@@ -145,9 +145,6 @@ def normalize_to_clean_blank(blank_cond=3,
     print(f"Done. Saved blank-normalized files to: {out_dir.resolve()}")
 
 
-from pathlib import Path
-import numpy as np
-
 def zscore_all_files(in_dir="data/processed/condsXn",
                     out_dir="data/processed/condsXnZ",
                     zero_frames=(24, 25, 26),   # MATLAB 25:27 -> Python
@@ -192,12 +189,33 @@ def zscore_all_files(in_dir="data/processed/condsXn",
 
     print(f"Done. Saved Z-scored files to: {out_dir.resolve()}")
 
-zscore_all_files()
-f = next(Path("data/processed/condsXnZ").glob("*.npy"))
-x = np.load(f)
 
-zero_frames = [24, 25, 26]
-baseline = x[:, zero_frames, :]
+def load_day_data(date_str, data_dir, ext=".npy"):
+    import os, glob, numpy as np
+    pattern = os.path.join(data_dir, f"*{date_str}*{ext}")
+    files_used = sorted(glob.glob(pattern))
 
-print("Baseline mean (should be ~0):", np.nanmean(baseline))
-print("Baseline std  (should be ~1):", np.nanmean(np.nanstd(baseline, axis=1)))
+    #exclude condition 3 - the blank
+    files_used = [f for f in files_used if "Z3" not in os.path.basename(f)]
+
+    if not files_used:
+        raise FileNotFoundError("No valid files found for this day (after excluding cond 3).")
+
+    arrays = []
+    for fp in files_used:
+        arr = np.load(fp)
+        arrays.append(arr)
+
+    # sanity check: same number of frames
+    n_frames = arrays[0].shape[1]
+    for arr in arrays:
+        if arr.shape[1] != n_frames:
+            raise ValueError("Frame mismatch between files.")
+
+    day_data = np.concatenate(arrays, axis=2)
+    return day_data, files_used
+
+
+day_data, files = load_day_data("270109", r"data/processed/condsXnZ")
+print(day_data.shape)   # (10000, n_frames, total_trials)
+print(len(files))
