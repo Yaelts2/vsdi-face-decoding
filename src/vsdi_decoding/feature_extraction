@@ -1,5 +1,4 @@
 import numpy as np
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector
@@ -10,38 +9,32 @@ def load_day_data(date_str, data_dir, ext=".npy"):
     import os, glob, numpy as np
     pattern = os.path.join(data_dir, f"*{date_str}*{ext}")
     files_used = sorted(glob.glob(pattern))
-
     #exclude condition 3 - the blank
     files_used = [f for f in files_used if "Z3" not in os.path.basename(f)]
-
     if not files_used:
         raise FileNotFoundError("No valid files found for this day (after excluding cond 3).")
-
     arrays = []
     for fp in files_used:
         arr = np.load(fp)
         arrays.append(arr)
-
     #same number of frames
     n_frames = arrays[0].shape[1]
     for arr in arrays:
         if arr.shape[1] != n_frames:
             raise ValueError("Frame mismatch between files.")
-
     day_data = np.concatenate(arrays, axis=2)
     return day_data, files_used
 
 
 
-def mimg(x, xsize=64, ysize=64, low='auto', high=None, frames=None, frameTime=0, width=0):
+def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
+    # if looking in raw data (not Zscored), data needs to substract 1  (-1)
     if x.ndim == 1:
         x = x.reshape(-1, 1)
-    
     m, n = x.shape
     if width <= 0:
         width = int(np.ceil(np.sqrt(n)))
     height = int(np.ceil(n / width))
-
     # Handle Clipping
     if isinstance(low, str) and low.lower() == 'auto':
         v_mins, v_maxs = [None] * n, [None] * n
@@ -50,37 +43,30 @@ def mimg(x, xsize=64, ysize=64, low='auto', high=None, frames=None, frameTime=0,
     else:
         v_mins = np.full(n, low) if np.isscalar(low) else low
         v_maxs = np.full(n, high) if np.isscalar(high) else high
-
     fig, axes = plt.subplots(height, width, figsize=(width*3, height*3), squeeze=False)
     axes_flat = axes.flatten()
-
     for i in range(n):
         ax = axes_flat[i]
         # 1. Reshape using 'C' order because your data is "ordered by rows"
         # 2. We reshape as (xsize, ysize) or (ysize, xsize) depending on the source
         img_data = x[:, i].reshape((ysize, xsize), order='C')
-        
-        # Use 'jet' or 'nipy_spectral' to match that bright MATLAB look
+        # Use 'jet' or 'nipy_spectral' 
         im = ax.imshow(img_data, cmap='jet', vmin=v_mins[i], vmax=v_maxs[i], origin='upper')
-        
         ax.axis('off')
-        
         # Add frame numbers if provided
         if frames is not None:
             ax.set_title(f"frame {frames[i]}", fontsize=6)
-
     # Hide extra subplots
     for j in range(i + 1, len(axes_flat)):
         axes_flat[j].axis('off')
-
     plt.tight_layout()
+    plt.show()    
     return axes_flat
 
 
 
-def extract_window(data, onset_frame=28, frames_after_onset=7, window_len=5):
-    start = onset_frame + frames_after_onset
-    end = start + window_len
+
+def extract_window(data, start=35, end=45):
     if start < 0 or end > data.shape[1]:
         raise ValueError(f"Window [{start}:{end}] out of bounds for n_frames={data.shape[1]}")
     return data[:, start:end, :]
@@ -102,9 +88,7 @@ def choose_polygon(map_flat, pixels=100):
     plt.close()
     if len(pts) < 3:
         raise ValueError("Polygon requires at least 3 points")
-
     poly = Path(pts)
-
     # create pixel grid 
     X, Y = np.meshgrid(
         np.arange(pixels) + 0.5,
@@ -112,8 +96,25 @@ def choose_polygon(map_flat, pixels=100):
     )
     points = np.column_stack([X.ravel(), Y.ravel()])
     mask_flat = poly.contains_points(points)
+    print(mask_flat.shape)
+    fig, ax = plt.subplots()
+    ax.imshow(mask_flat.reshape(pixels, pixels), cmap='gray', interpolation='nearest')
+    ax.set_title("ROI mask")
+    plt.show() 
     roi_idx = np.where(mask_flat)[0]
     return mask_flat, roi_idx
 
 
+#example usage
 
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXnZ\condsXnZ1_030209e.npy")
+x_avg = x.mean(axis=2)
+print(x_avg.shape)
+x_avg_frames =  x_avg[:, 55:65]
+print(x_avg_frames.shape)
+x_avg_frames= x_avg_frames.mean(axis=1, keepdims=True)
+print(x_avg_frames.shape)
+mimg(x_avg_frames, xsize=100, ysize=100, low=-3, high=3)
+'''
+roi,x=choose_polygon(x_avg[:, 50], pixels=100)
+'''
