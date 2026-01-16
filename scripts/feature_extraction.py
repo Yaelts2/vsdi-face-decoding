@@ -60,8 +60,7 @@ def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
     for j in range(i + 1, len(axes_flat)):
         axes_flat[j].axis('off')
     plt.tight_layout()
-    plt.show()    
-    return axes_flat
+    return fig,axes_flat
 
 
 
@@ -73,48 +72,53 @@ def extract_window(data, start=35, end=45):
 
 
 
-def choose_polygon(map_flat, pixels=100):
+def creat_ROI(map_flat, pixels=100):
     """
     map_flat : (pixels*pixels,) vector
     returns:
         mask_flat : (pixels*pixels,) bool
         roi_idx   : indices where mask == True
     """
-    #display using mimg 
-    mimg(map_flat.reshape(-1, 1), xsize=pixels, ysize=pixels, low=-3, high=3)
-    plt.title("ROI: left click = add point, right click = finish")
-    #collect polygon points 
+    fig, axes_flat = mimg(map_flat.reshape(-1, 1) - 1,
+                        xsize=pixels, ysize=pixels,
+                        low=-0.0009, high=0.003)
+    ax = axes_flat[0]
+    ax.set_title("ROI: left click = add point, right click = finish")
+    # show + make sure GUI is ready BEFORE ginput
+    plt.show(block=False)
+    plt.pause(0.05)
+    plt.sca(ax)  # ensure clicks go to this axes
     pts = plt.ginput(n=-1, timeout=0)  # right click to finish
-    plt.close()
+    plt.close(fig)
     if len(pts) < 3:
         raise ValueError("Polygon requires at least 3 points")
     poly = Path(pts)
-    # create pixel grid 
-    X, Y = np.meshgrid(
-        np.arange(pixels) + 0.5,
-        np.arange(pixels) + 0.5
-    )
+
+    # pixel-center grid
+    X, Y = np.meshgrid(np.arange(pixels) + 0.5,
+                    np.arange(pixels) + 0.5)
     points = np.column_stack([X.ravel(), Y.ravel()])
     mask_flat = poly.contains_points(points)
-    print(mask_flat.shape)
-    fig, ax = plt.subplots()
-    ax.imshow(mask_flat.reshape(pixels, pixels), cmap='gray', interpolation='nearest')
-    ax.set_title("ROI mask")
-    plt.show() 
     roi_idx = np.where(mask_flat)[0]
+    #display mask
+    fig2, ax2 = plt.subplots()
+    ax2.imshow(mask_flat.reshape(pixels, pixels), cmap='gray',
+            interpolation='nearest', origin='upper', aspect='equal')
+    ax2.set_title("ROI mask")
+    plt.show()
     return mask_flat, roi_idx
 
 
 #example usage
-
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXnZ\condsXnZ1_030209e.npy")
+'''
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_030209e.npy")
 x_avg = x.mean(axis=2)
 print(x_avg.shape)
 x_avg_frames =  x_avg[:, 55:65]
 print(x_avg_frames.shape)
-x_avg_frames= x_avg_frames.mean(axis=1, keepdims=True)
-print(x_avg_frames.shape)
-mimg(x_avg_frames, xsize=100, ysize=100, low=-3, high=3)
-'''
+mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003)
+
 roi,x=choose_polygon(x_avg[:, 50], pixels=100)
 '''
+
+

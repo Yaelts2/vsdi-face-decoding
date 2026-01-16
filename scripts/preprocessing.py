@@ -277,4 +277,83 @@ if __name__ == "__main__":
     build_face_vs_nonface_dataset()
 '''
     
-def building_dataset()
+def build_X_y(face_file, nonface_file, data_dir):
+    """
+    Load one face condition and one non-face condition
+    and return X (all trials) and y (labels).
+
+    X shape: (pixels, frames, trials)
+    y shape: (trials,)
+    """
+    data_dir = Path(data_dir) 
+    # load data
+    X_face = np.load(data_dir / face_file)
+    X_non  = np.load(data_dir / nonface_file)
+    print("Loaded shapes:")
+    print(" face    :", X_face.shape)
+    print(" nonface :", X_non.shape)
+    # make trial counts equal
+    n = min(X_face.shape[2], X_non.shape[2])
+    X_face = X_face[:, :, :n]
+    X_non  = X_non[:, :, :n]
+    # stack trials
+    X = np.concatenate([X_face, X_non], axis=2)
+    # labels based on order
+    FACE_LABEL = 1
+    NONFACE_LABEL = 0
+    y = np.array([FACE_LABEL]*n + [NONFACE_LABEL]*n)
+    print("Final:")
+    print(" X shape:", X.shape)
+    print(" y:", y)
+    return X, y, {"n_trials_per_class": n,
+                    "face_file": face_file,
+                    "nonface_file": nonface_file}
+
+# example usage
+'''
+X, y, metadata = build_X_y(
+    face_file="condsXn1_270109b.npy",
+    nonface_file="condsXn5_270109b.npy",
+    data_dir="data/processed/condsXn/"
+)
+print("Metadata:", metadata)
+print("X shape:", X.shape)
+print("y shape:", y.shape)
+
+'''
+
+
+def zscore_dataset(X,
+                baseline_frames=(1, 25),
+                eps=1e-8
+                ):
+    """
+    Z-score trials using a baseline computed from the
+    MEAN across trials.
+
+    Parameters
+    ----------
+    X : np.ndarray- Shape: (pixels, frames, trials)
+    baseline_frames : tuple - (start, end) frame indices (Python-style)
+    eps : float-   Numerical stability
+
+    Returns
+    -------
+    X_z : np.ndarray-   Same shape as X
+    mean : np.ndarray-  Shape: (pixels, 1, 1)
+    std : np.ndarray-   Shape: (pixels, 1, 1)
+    """
+    #Mean across trials
+    mean_across_trials = np.mean(X, axis=2)                 # (pixels, frames)
+    #Baseline window
+    start, end = baseline_frames
+    baseline_window = mean_across_trials[:, start:end]      # (pixels, baseline_frames)
+    #Pixel-wise baseline statistics
+    mean = np.mean(baseline_window, axis=1, keepdims=True)  # (pixels, 1)
+    std  = np.std(baseline_window, axis=1, keepdims=True)   # (pixels, 1)
+    # reshape for broadcasting
+    mean = mean[:, None]                                    # (pixels, 1, 1)
+    std  = std[:, None]                                     # (pixels, 1, 1)
+    # Apply to each trial
+    X_z = (X - mean) / np.maximum(std, eps)
+    return X_z, mean, std
