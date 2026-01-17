@@ -1,227 +1,295 @@
 # model_evaluation.py
 
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import StratifiedKFold
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score
+from feature_extraction import mimg
+from sklearn.metrics import roc_curve, auc
 
-def plot_accuracy_kfold_bars(cv_fold_acc, chance=0.5, title="Decoding accuracy (CV)"):
+
+def plot_accuracy_kfold_bars(cv_fold_acc,
+                            chance=0.5,
+                            title="Accuracy per fold ",
+                            figsize=(6, 4),
+                            ):
     """
-    Bar plot of each fold accuracy + mean ± SEM.
-    - Shows individual folds as bars (not one big bar)
-    - Adds chance line
-    - Uses a tighter y-range (0.4–1) for readability
-    - Annotates mean value
+    Bar plot of each CV fold accuracy + mean ± SEM.
+
+    - Individual bars per fold
+    - Mean ± SEM shown separately
+    - Chance level indicated
+    - Optimized for presentation (larger fonts)
     """
     acc = np.asarray(cv_fold_acc, dtype=float)
     k = acc.size
-    mean = acc.mean()
-    sem = acc.std(ddof=1) / np.sqrt(k) if k > 1 else 0.0
-
+    mean = np.nanmean(acc)
+    sem = np.nanstd(acc, ddof=1) / np.sqrt(k) if k > 1 else 0.0
     x = np.arange(1, k + 1)
+    plt.figure(figsize=figsize)
+    # Fold bars
+    plt.bar(x, acc, alpha=0.8)
+    # Reference lines
+    plt.axhline(chance, linestyle="--", linewidth=2, label="Chance")
+    plt.axhline(mean, linestyle=":", linewidth=2, label="Mean")
+    # Mean ± SEM point
+    mean_x = k + 0.8
+    plt.errorbar(mean_x,
+                mean,
+                yerr=sem,
+                fmt="o",
+                capsize=6,
+                linewidth=2,
+                )
+    # Mean annotation
+    plt.text(mean_x,
+            mean + 0.02,
+            f"{mean:.2f} ± {sem:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=12,
+            fontweight="bold",
+            )
 
-    plt.figure()
-    plt.bar(x, acc)
-    plt.axhline(chance, linestyle="--")
-    plt.axhline(mean, linestyle=":")
-    plt.errorbar([k + 0.8], [mean], yerr=[sem], fmt="o", capsize=6)
-
-    # mean annotation
-    plt.text(k + 0.8, mean + 0.02, f"mean={mean:.2f}", ha="center", va="bottom")
-
-    plt.xticks(list(x) + [k + 0.8], [f"Fold {i}" for i in x] + ["Mean"])
-    plt.ylabel("Accuracy")
-    plt.title(title)
+    # Axes formatting
+    plt.xticks(list(x) + [mean_x],
+            [f"Fold {i}" for i in x] + ["Mean"],
+            fontsize=12,
+            )
+    plt.ylabel("Accuracy", fontsize=14)
+    plt.title(title, fontsize=16, fontweight="bold")
     plt.ylim(0.4, 1.0)
+    plt.legend(fontsize=11, frameon=False)
     plt.tight_layout()
     plt.show()
 
 
-def plot_confusion_matrix(y_true, y_pred,
-                          class_names=("Non-face", "Face"),
-                          title="Confusion matrix (normalized)"):
+
+def plot_confusion_matrix(y_true,
+                        y_pred,
+                        class_names=("Non-face", "Face"),
+                        title="Confusion matrix",
+                        figsize=(5.5, 4.8),
+                        show_counts=True):
     """
-    Clean normalized confusion matrix.
-    - Normalized per true class
-    - Fixed color scale (0–1) so it stays consistent across runs
+    Clean row-normalized confusion matrix (per true class).
+    - Fixed color scale (0–1) for consistency across runs
+    - Larger typography for slides
+    - Optional raw counts overlay (useful for imbalanced folds)
     """
-    y_true = np.asarray(y_true).astype(int)
-    y_pred = np.asarray(y_pred).astype(int)
+    y_true = np.asarray(y_true, dtype=int).ravel()
+    y_pred = np.asarray(y_pred, dtype=int).ravel()
 
-    cm = confusion_matrix(y_true, y_pred)
-    cm = cm / cm.sum(axis=1, keepdims=True)
-
-    plt.figure()
-    plt.imshow(cm, vmin=0, vmax=1)
-    plt.colorbar()
-    plt.xticks([0, 1], class_names)
-    plt.yticks([0, 1], class_names)
-    plt.xlabel("Predicted label")
-    plt.ylabel("True label")
-    plt.title(title)
-
-    for i in range(2):
-        for j in range(2):
-            plt.text(j, i, f"{cm[i, j]:.2f}", ha="center", va="center")
-
+    cm_counts = confusion_matrix(y_true, y_pred, labels=np.arange(len(class_names)))
+    row_sums = cm_counts.sum(axis=1, keepdims=True)
+    cm = np.divide(cm_counts, np.maximum(row_sums, 1), dtype=float)  # avoid /0
+    plt.figure(figsize=figsize)
+    im = plt.imshow(cm, vmin=0, vmax=1)
+    cbar = plt.colorbar(im)
+    cbar.ax.tick_params(labelsize=11)
+    cbar.set_label("Proportion", fontsize=12)
+    n = len(class_names)
+    plt.xticks(np.arange(n), class_names, fontsize=12)
+    plt.yticks(np.arange(n), class_names, fontsize=12)
+    plt.xlabel("Predicted label", fontsize=14)
+    plt.ylabel("True label", fontsize=14)
+    plt.title(title, fontsize=16, fontweight="bold")
+    # Cell labels with contrast-aware text color
+    for i in range(n):
+        for j in range(n):
+            val = cm[i, j]
+            txt = f"{val:.2f}"
+            if show_counts:
+                txt += f"\n(n={cm_counts[i, j]})"
+            plt.text(
+                j, i, txt,
+                ha="center", va="center",
+                fontsize=12,
+                fontweight="bold",
+                color="white" if val >= 0.5 else "black",
+            )
     plt.tight_layout()
     plt.show()
 
-def plot_roc_curve(y_true, y_scores, title="ROC Curve"):
-    """
-    Plot ROC curve given true labels and predicted scores.
-    """
-    from sklearn.metrics import roc_curve, auc
 
-    y_true = np.asarray(y_true).astype(int)
-    y_scores = np.asarray(y_scores).astype(float)
+
+
+def plot_roc_curve(y_true,
+                y_scores,
+                title="ROC curve",
+                figsize=(5.5, 4.8)):
+    """
+    Plot ROC curve with AUC.
+    Parameters
+    ----------
+    y_true : array-like, shape (n_samples,)
+        Binary ground-truth labels (0/1)
+    y_scores : array-like, shape (n_samples,)
+        Continuous decision values (e.g., SVM decision_function)
+    """
+
+    y_true = np.asarray(y_true, dtype=int).ravel()
+    y_scores = np.asarray(y_scores, dtype=float).ravel()
 
     fpr, tpr, _ = roc_curve(y_true, y_scores)
     roc_auc = auc(fpr, tpr)
 
-    plt.figure()
-    plt.plot(fpr, tpr, color='blue', label=f'ROC curve (area = {roc_auc:.2f})')
-    plt.plot([0, 1], [0, 1], color='red', linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title(title)
-    plt.legend(loc="lower right")
-    plt.grid()
+    plt.figure(figsize=figsize)
+    # ROC curve
+    plt.plot(fpr,tpr,
+            linewidth=2.5,
+            label=f"AUC = {roc_auc:.2f}")
+    # Chance diagonal
+    plt.plot([0, 1],[0, 1],
+            linestyle="--",
+            linewidth=2,
+            color="gray",
+            label="Chance")
+
+    plt.xlabel("False positive rate", fontsize=14)
+    plt.ylabel("True positive rate", fontsize=14)
+    plt.title(title, fontsize=16, fontweight="bold")
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.legend(loc="lower right", fontsize=12, frameon=False)
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+    return fpr, tpr, roc_auc
+
+    
+
+def plot_spatial_weights(best_model,
+                        ROI_mask,
+                        n_frames,
+                        xsize=100,
+                        ysize=100,
+                        aggregate="sum",
+                        title="Spatial decoding weights",
+                        figsize=(6.5, 6.5)):
+    """
+    Project linear SVM weights back into cortical space.
+    Parameters
+    ----------
+    best_model : trained linear SVM
+        Must have coef_ attribute
+    ROI_mask : array-like, bool
+        Flat mask of shape (n_pixels,)
+    n_frames : int
+        Number of temporal features per pixel
+    aggregate : {"sum", "mean"}
+        How to aggregate absolute weights across time
+    """
+    ROI_mask = np.asarray(ROI_mask, dtype=bool).ravel()
+    # --- reshape weights ---
+    coef = best_model.coef_.ravel()
+    expected_size = ROI_mask.sum() * n_frames
+    if coef.size != expected_size:
+        raise ValueError(
+            f"coef_ size ({coef.size}) does not match "
+            f"ROI pixels × n_frames ({expected_size})"
+        )
+    weights = coef.reshape(ROI_mask.sum(), n_frames)
+    # --- temporal aggregation ---
+    if aggregate == "sum":
+        spatial_map_flat = np.sum(np.abs(weights), axis=1)
+        agg_label = "Σ |w(t)|"
+    elif aggregate == "mean":
+        spatial_map_flat = np.mean(np.abs(weights), axis=1)
+        agg_label = "mean |w(t)|"
+    else:
+        raise ValueError("aggregate must be 'sum' or 'mean'")
+    # --- project back to image space ---
+    spatial_weight_img = np.zeros(ROI_mask.shape, dtype=float)
+    spatial_weight_img[ROI_mask] = spatial_map_flat
+    # scale only by ROI values
+    vmin = spatial_map_flat.min()
+    vmax = spatial_map_flat.max()
+    # --- plot ---
+    mimg(spatial_weight_img,
+        xsize=xsize,
+        ysize=ysize,
+        low=vmin,
+        high=vmax)
+
+    plt.title(f"{title}",fontsize=16,fontweight="bold")
     plt.tight_layout()
     plt.show()
     
+    
 def permutation_test_linear_svm_fast(
     X, y,
-    n_perm=300,
+    real_acc=None,
+    n_perm=100,
     n_splits=5,
     C=0.01,
     seed=0,
-    early_stop_alpha=0.05,     # set None to disable early stop
-    min_perm_before_stop=100
+    print_every=10,
+    bins=30,
+    title="Permutation test (Linear SVM)",
+    figsize=(6.2, 4.8),
 ):
     """
-    Faster permutation test:
-    - uses LinearSVC (faster than SVC(kernel='linear'))
-    - precomputes CV splits once
-    - optional early stopping
+    Permutation test for decoding accuracy using a LinearSVC + fixed CV splits.
 
-    Returns:
-        shuffled_acc: (n_perm,) mean CV accuracy per permutation
-        p_value: one-sided p-value for real_acc (computed outside or inside if provided)
+    Returns
+    -------
+    shuffled_acc : (n_perm,) array
+        Mean CV accuracy for each label permutation.
+    p_value : float or None
+        One-sided permutation p-value: P(shuffled_acc >= real_acc).
+        Uses +1 smoothing: (k+1)/(n+1).
     """
     rng = np.random.default_rng(seed)
-    y = np.asarray(y).astype(int)
-
+    y = np.asarray(y, dtype=int).ravel()
+    X = np.asarray(X)
+    # Precompute CV splits ONCE (keeps the test fair & fast)
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    splits = list(cv.split(X, y))  # reuse folds
-
-    shuffled_acc = []
+    splits = list(cv.split(X, y))
+    shuffled_acc = np.empty(n_perm, dtype=float)
+    t0 = time.time()
     for p in range(n_perm):
         y_shuff = rng.permutation(y)
-
-        fold_acc = []
-        for train_idx, test_idx in splits:
-            clf = LinearSVC(C=C, dual=True, max_iter=5000)  # dual=True works well for high-D
+        fold_acc = np.empty(len(splits), dtype=float)
+        for i, (train_idx, test_idx) in enumerate(splits):
+            clf = LinearSVC(C=C, dual=True, max_iter=5000, random_state=seed)
             clf.fit(X[train_idx], y_shuff[train_idx])
             y_pred = clf.predict(X[test_idx])
-            fold_acc.append(accuracy_score(y_shuff[test_idx], y_pred))
-
-        shuffled_acc.append(float(np.mean(fold_acc)))
-
-    return np.array(shuffled_acc, dtype=float)
-
-
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.model_selection import StratifiedKFold
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score
-
-
-def plot_under_overfit_curve_svm(
-    X, y,
-    C_values=(1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1, 3, 10, 30, 100),
-    n_splits=5,
-    seed=0,
-    title="Underfitting vs Overfitting (SVM)"
-):
-    """
-    Plots:
-      - Training error (1-acc) vs model complexity log10(C)
-      - CV error (1-acc) vs model complexity log10(C)  [proxy for test error]
-    Marks the best fit (min CV error).
-    Assumes X already z-scored.
-    """
-    X = np.asarray(X)
-    y = np.asarray(y).astype(int)
-
-    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-
-    train_err = []
-    cv_err = []
-
-    for C in C_values:
-        # Training error
-        clf = SVC(kernel="linear", C=C)
-        clf.fit(X, y)
-        y_pred_train = clf.predict(X)
-        train_acc = accuracy_score(y, y_pred_train)
-        train_err.append(1.0 - train_acc)
-
-        # CV error (proxy for test error)
-        fold_acc = []
-        for tr, te in cv.split(X, y):
-            clf_cv = SVC(kernel="linear", C=C)
-            clf_cv.fit(X[tr], y[tr])
-            y_pred = clf_cv.predict(X[te])
-            fold_acc.append(accuracy_score(y[te], y_pred))
-        cv_err.append(1.0 - float(np.mean(fold_acc)))
-
-    train_err = np.array(train_err, dtype=float)
-    cv_err = np.array(cv_err, dtype=float)
-
-    # Complexity axis
-    x = np.log10(np.array(C_values, dtype=float))
-
-    # Best fit = minimum CV error
-    best_idx = int(np.argmin(cv_err))
-    best_x = x[best_idx]
-    best_y = cv_err[best_idx]
-
-    # ---- Plot ----
-    plt.figure()
-    plt.plot(x, cv_err, label="Test Error (CV)")
-    plt.plot(x, train_err, label="Training Error")
-
-    # Vertical line at best fit
-    plt.axvline(best_x, linestyle="--")
-    plt.text(best_x, best_y, "  Best Fit", va="bottom")
-
-    plt.xlabel("Model complexity  (log10(C))")
-    plt.ylabel("Error  (1 - accuracy)")
-    plt.title(title)
-    plt.ylim(0, 1)
-
-    # Under/overfitting labels
-    ax = plt.gca()
-    xmin, xmax = ax.get_xlim()
-    ymin, ymax = ax.get_ylim()
-    plt.text(xmin, ymax * 0.95, "Underfitting  \u2190", ha="left", va="top")
-    plt.text(xmax, ymax * 0.95, "\u2192  Overfitting", ha="right", va="top")
-
-    plt.legend()
+            fold_acc[i] = accuracy_score(y_shuff[test_idx], y_pred)
+        shuffled_acc[p] = float(np.mean(fold_acc))
+        if print_every and (p + 1) % print_every == 0:
+            elapsed = time.time() - t0
+            per_perm = elapsed / (p + 1)
+            eta = per_perm * (n_perm - (p + 1))
+            print(
+                f"perm {p+1}/{n_perm} | elapsed {elapsed:.1f}s | "
+                f"~{per_perm:.2f}s/perm | ETA {eta/60:.1f} min"
+            )
+    # p-value (one-sided) with +1 smoothing
+    p_value = None
+    if real_acc is not None:
+        real_acc = float(real_acc)
+        p_value = (np.sum(shuffled_acc >= real_acc) + 1) / (n_perm + 1)
+    # --- Plot (presentation-ready) ---
+    plt.figure(figsize=figsize)
+    plt.hist(shuffled_acc, bins=bins, alpha=0.75, edgecolor="black", linewidth=1)
+    # Mark chance (optional but useful) and real performance
+    chance = 1.0 / len(np.unique(y))
+    plt.axvline(chance, linestyle="--", linewidth=2, color="gray", label=f"Chance = {chance:.2f}")
+    if real_acc is not None:
+        plt.axvline(real_acc, linewidth=3, label=f"Real acc = {real_acc:.3f}")
+        if p_value is not None:
+            plt.text(0.02, 0.95,f"p = {p_value:.4f}", transform=plt.gca().transAxes, ha="left", va="top", fontsize=13,fontweight="bold")
+    plt.xlabel("Shuffled mean CV accuracy", fontsize=14)
+    plt.ylabel("Count", fontsize=14)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.title(title, fontsize=16, fontweight="bold")
+    plt.legend(loc="upper right", fontsize=11, frameon=False)
     plt.tight_layout()
     plt.show()
 
-    return {
-        "C_values": C_values,
-        "x_log10C": x,
-        "train_error": train_err,
-        "cv_error": cv_err,
-        "best_C": float(C_values[best_idx]),
-        "best_cv_error": float(best_y),
-    }
+    return shuffled_acc, p_value

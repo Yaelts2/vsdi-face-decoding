@@ -2,6 +2,7 @@
 
 import numpy as np
 from sklearn.metrics import accuracy_score
+import matplotlib.pyplot as plt
 
 from preprocessing import (split_conds_files,
                         frame_zero_normalize_all_conds,
@@ -9,8 +10,8 @@ from preprocessing import (split_conds_files,
                         build_X_y,
                         zscore_dataset)
 from feature_extraction import extract_window, creat_ROI, mimg
-from model_functions import flatten_data, split_data, svm_kfold
-from model_evaluation import plot_accuracy_kfold_bars, plot_confusion_matrix, permutation_test_linear_svm_fast, plot_under_overfit_curve_svm
+from model_functions import flatten_data, split_data, svm_kfold,svm_kfold_nested
+from model_evaluation import plot_accuracy_kfold_bars, plot_confusion_matrix, plot_roc_curve, plot_spatial_weights, permutation_test_linear_svm_fast
 
 '''
 # ================== optional preprocessing ==================
@@ -56,7 +57,7 @@ X, y,metadata = build_X_y(face_file="condsXn1_270109b.npy",
                 nonface_file="condsXn5_270109b.npy",
                 data_dir="data/processed/condsXn/")
 print(f"Dataset shape: {X.shape}, Labels shape: {y.shape}")
-print(f"Metadata keys: {list(metadata.keys())}")
+
 # 5) Z score across all trials
 X_z,mean,std=zscore_dataset(X,
                             baseline_frames=(5, 25),
@@ -67,6 +68,8 @@ X=extract_window(X_z, 34, 44)  # (10000 x 5 x trials)
 print(f"Feature window extracted: {X.shape}")   
 #ROI selection
 ROI_mask=np.load(r"C:\project\vsdi-face-decoding\data\processed\ROI_mask.npy")
+fig,axes_flat =mimg(ROI_mask, xsize=100, ysize=100, low=0, high=1)
+plt.show()
 print(f"ROI mask loaded: {ROI_mask.shape}")
 X=X[ROI_mask,:,:] # (roi_pixels x 5 x trials)
 print(f"ROI selected: {X.shape}")
@@ -77,7 +80,7 @@ print(f"Data flattened: {X_flat.shape}")
 X_train, X_test, y_train, y_test = split_data(X_flat, y, test_size=0.2)
 print(f"Train/test split: {X_train.shape}, {X_test.shape}")
 
-
+'''
 #9) train / evaluate model
 results,best_model =svm_kfold(
     X_train, y_train,
@@ -86,7 +89,13 @@ results,best_model =svm_kfold(
     kernel="linear",
     seed=0
 )
-
+'''
+results,best_model=svm_kfold_nested(
+    X_train, y_train,
+    n_splits=5,
+    C_grid=(0.01, 0.1),
+    kernel="linear",
+    seed=0)
 print("Cross-validation results:")
 for k, v in results.items():
     print(f"{k}: {v}")  
@@ -104,20 +113,22 @@ y_pred = best_model.predict(X_test)
 plot_confusion_matrix(y_test, y_pred, class_names=("Non-face", "Face"))
 
 
+# plot ROC curve
+y_scores = best_model.decision_function(X_test)
+fpr, tpr, auc_val = plot_roc_curve(y_true=y_test,y_scores=y_scores, title="Face vs Non-face ROC")
+print("AUC:", auc_val)
 
-out = plot_under_overfit_curve_svm(X_flat, y, n_splits=5)
-print("Best C:", out["best_C"])
+# plot spatial weights
+plot_spatial_weights(best_model, ROI_mask, n_frames=10, aggregate="mean")
 
 
-
-real_acc = results["cv_mean_accuracy"]
-shuffled_acc = permutation_test_linear_svm_fast(
-    X_flat, y,
-    n_perm=300,
-    n_splits=5,
-    C=results["best_C"],
-    seed=0
-)
-p_value = (np.sum(shuffled_acc >= real_acc) + 1) / (len(shuffled_acc) + 1)
-print("p =", p_value)
-
+# Quick Sanity Check: Shuffle the labels
+shuffle_result = permutation_test_linear_svm_fast(X=X_train,
+                                                y=y_train,
+                                                real_acc=real_acc,
+                                                n_perm=100,
+                                                n_splits=5,
+                                                C=0.01,
+                                                seed=42,
+                                                print_every=10,
+                                                bins=30)

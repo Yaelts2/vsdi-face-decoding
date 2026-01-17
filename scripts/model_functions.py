@@ -5,6 +5,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import cross_val_score
 
 def flatten_data(data_3d):
     """
@@ -93,6 +94,51 @@ def svm_kfold(
         "cv_mean_accuracy": float(fold_acc.mean()),
         "cv_std_accuracy": float(fold_acc.std(ddof=1)) if len(fold_acc) > 1 else 0.0,
         "grid_best_score_innerCV": float(grid.best_score_),
+    }
+
+    return results, best_model
+
+
+def svm_kfold_nested(
+    X, y,
+    n_splits=5,
+    C_grid=(0.01, 0.1, 1),
+    kernel="linear",
+    seed=0
+):
+    X = np.asarray(X)
+    y = np.asarray(y).astype(int)
+
+    # Use the same CV strategy for both inner and outer loops
+    cv_outer = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    cv_inner = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+
+    # 1) Define the Inner CV (Hyperparameter Tuning)
+    base_model = SVC(kernel=kernel)
+    grid_search = GridSearchCV(
+        estimator=base_model,
+        param_grid={"C": list(C_grid)},
+        cv=cv_inner,
+        scoring="accuracy",
+        n_jobs=-1
+    )
+
+    # 2) Run the Outer CV (Performance Estimation)
+    # This automatically runs grid_search.fit() on each training fold
+    # and evaluates on each held-out fold.
+    nested_scores = cross_val_score(grid_search, X, y, cv=cv_outer)
+
+    # 3) Fit final model on ALL data to get the Best C for deployment
+    grid_search.fit(X, y)
+    best_model = grid_search.best_estimator_
+    best_C = grid_search.best_params_["C"]
+
+    results = {
+        "best_C": float(best_C),
+        "cv_fold_accuracy": nested_scores,
+        "cv_mean_accuracy": float(nested_scores.mean()),
+        "cv_std_accuracy": float(nested_scores.std(ddof=1)),
+        "inner_cv_best_score": float(grid_search.best_score_),
     }
 
     return results, best_model

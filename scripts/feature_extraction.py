@@ -61,8 +61,18 @@ def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
         axes_flat[j].axis('off')
     plt.tight_layout()
     return fig,axes_flat
-
-
+'''
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_270109b.npy")
+x_avg = x.mean(axis=2)
+x_avg_frames =  x_avg[:, 25:120]
+fig,axes_flat =mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=range(25,120))
+plt.show()
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_270109b.npy")
+x_avg = x.mean(axis=2)
+x_avg_frames =  x_avg[:, 25:120]
+fig,axes_flat =mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=range(25,120))
+plt.show()
+'''
 
 
 def extract_window(data, start=35, end=45):
