@@ -11,7 +11,7 @@ from preprocessing import (split_conds_files,
                         zscore_dataset)
 from feature_extraction import extract_window, creat_ROI, mimg
 from model_functions import flatten_data, split_data, svm_kfold,svm_kfold_nested
-from model_evaluation import plot_accuracy_kfold_bars, plot_confusion_matrix, plot_roc_curve, plot_spatial_weights, permutation_test_linear_svm_fast
+from model_evaluation import plot_accuracy_kfold_bars, plot_confusion_matrix, plot_roc_curve, plot_spatial_weights, permutation_test_linear_svm_fast, plot_top_weights
 
 '''
 # ================== optional preprocessing ==================
@@ -63,6 +63,7 @@ X_z,mean,std=zscore_dataset(X,
                             baseline_frames=(5, 25),
                             eps=1e-8)
 print("Data z-scored across all trials.")
+print(X_z.shape)
 #6) feature extraction: window + ROI
 X=extract_window(X_z, 34, 44)  # (10000 x 5 x trials)
 print(f"Feature window extracted: {X.shape}")   
@@ -119,7 +120,9 @@ fpr, tpr, auc_val = plot_roc_curve(y_true=y_test,y_scores=y_scores, title="Face 
 print("AUC:", auc_val)
 
 # plot spatial weights
-plot_spatial_weights(best_model, ROI_mask, n_frames=10, aggregate="mean")
+spatial_map=plot_spatial_weights(best_model, ROI_mask, n_frames=10, aggregate="mean")
+
+plot_top_weights(spatial_map, percentile=95, xsize=100, ysize=100, title="Top 5% weights")
 
 
 # Quick Sanity Check: Shuffle the labels

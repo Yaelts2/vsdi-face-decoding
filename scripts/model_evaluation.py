@@ -218,8 +218,39 @@ def plot_spatial_weights(best_model,
     plt.title(f"{title}",fontsize=16,fontweight="bold")
     plt.tight_layout()
     plt.show()
-    
-    
+    return spatial_weight_img
+
+
+
+def plot_top_weights(spatial_weight_img, percentile=95, xsize=100, ysize=100, title="Top 5% weights"):
+    """
+    Takes an existing spatial weight map and plots only the pixels 
+    above the specified percentile.
+    """
+    # 1. Isolate the non-zero values (the ROI pixels) to get a fair percentile
+    roi_pixels = spatial_weight_img[spatial_weight_img > 0]
+    if len(roi_pixels) == 0:
+        print("Warning: The spatial_weight_img is empty or contains only zeros.")
+        return
+    # 2. Calculate the threshold value (e.g., 95th percentile)
+    thresh_value = np.percentile(roi_pixels, percentile)
+    # 3. Create the thresholded image
+    # We keep the original values for pixels above threshold, set others to 0
+    thresholded_img = np.where(spatial_weight_img >= thresh_value, spatial_weight_img, 0)
+    # 4. Plot using your existing mimg function
+    # We set low=0 so the background is neutral and high to the max of the map
+    mimg(thresholded_img,
+        xsize=xsize,
+        ysize=ysize,
+        low=0, 
+        high=spatial_weight_img.max())
+
+    plt.title(f"{title}\n(Top {100-percentile}%)", fontsize=15, fontweight="bold")
+    plt.tight_layout()
+    plt.show()
+    return thresholded_img
+
+
 def permutation_test_linear_svm_fast(
     X, y,
     real_acc=None,
