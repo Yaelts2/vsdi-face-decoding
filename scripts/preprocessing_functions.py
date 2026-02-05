@@ -2,6 +2,7 @@ from pathlib import Path
 import numpy as np
 from scipy.io import loadmat
 import json
+import matplotlib.colors as mcolors
 
 def split_conds_files(raw_dir="data/raw_mat",
                     out_dir="data/processed/all_conds_npy",
@@ -157,125 +158,6 @@ def zscore_all_files(in_dir="data/processed/condsXn",
 
 
 
-'''
-# should be in configuration file
-#when using in main need to import the dir paths from config
-SCRIPT_DIR = Path(__file__).resolve().parent
-DATA_DIR = SCRIPT_DIR / "Data" / "condsXnZ"
-OUT_DIR = SCRIPT_DIR / "Data" / "labeled_face_vs_nonface"
-
-print(">>> labeling.py started")
-print("Script location:", SCRIPT_DIR)
-print("Input folder:", DATA_DIR)
-print("Input folder exists?", DATA_DIR.exists())
-
-def build_face_vs_nonface_dataset(face_conds=(1, 2),
-                                nonface_conds=(4, 5),   # blank (3) ignored
-                                dtype=np.float32
-                                ):
-    if not DATA_DIR.exists():
-        raise FileNotFoundError(f"Input directory not found: {DATA_DIR}")
-
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    files = sorted(DATA_DIR.glob("condsXnZ*_*.npy"))
-    print("Found input files:", len(files))
-    if len(files) == 0:
-        raise FileNotFoundError(f"No files matched condsXnZ*_*.npy in {DATA_DIR}")
-
-    # -------------------------
-    # PASS 1: figure out total samples + feature size
-    # -------------------------
-    total_trials = 0
-    n_features = None
-
-    keep_files = []  # (file_path, label, session)
-    for i, f in enumerate(files, 1):
-        stem = f.stem.replace("condsXnZ", "")
-        cond_str, session = stem.split("_", 1)
-        cond = int(cond_str)
-
-        if cond in face_conds:
-            label = 1
-        elif cond in nonface_conds:
-            label = 0
-        else:
-            continue
-
-        mat = np.load(f, mmap_mode="r")  # cheap header read + OS paging
-        if mat.ndim != 3:
-            raise ValueError(f"{f.name}: expected 3D array, got {mat.shape}")
-
-        pixels, frames, trials = mat.shape
-        feat = pixels * frames
-        if n_features is None:
-            n_features = feat
-        elif n_features != feat:
-            raise ValueError(f"Feature size mismatch in {f.name}: {feat} vs {n_features}")
-
-        total_trials += trials
-        keep_files.append((f, label, session))
-
-        if i % 5 == 0:
-            print(f"[Pass1] scanned {i}/{len(files)} files... kept so far: {len(keep_files)}")
-
-    if total_trials == 0:
-        raise ValueError("No trials collected. Check condition numbers / files.")
-
-    print("Total samples (trials):", total_trials)
-    print("Features per sample:", n_features)
-
-    # -------------------------
-    # PASS 2: write directly to disk (memmap) to avoid giant RAM concat
-    # -------------------------
-    X_path = OUT_DIR / "X.npy"
-    y_path = OUT_DIR / "y.npy"
-    s_path = OUT_DIR / "sessions.npy"
-
-    # Pre-allocate on disk
-    X_mm = np.lib.format.open_memmap(
-        X_path, mode="w+", dtype=dtype, shape=(total_trials, n_features)
-    )
-    y = np.empty((total_trials,), dtype=np.int32)
-    sessions = np.empty((total_trials,), dtype=object)
-
-    idx = 0
-    for j, (f, label, session) in enumerate(keep_files, 1):
-        mat = np.load(f).astype(dtype, copy=False)  # load one file at a time
-        pixels, frames, trials = mat.shape
-
-        # reshape to (trials, pixels*frames)
-        X_block = mat.reshape(pixels * frames, trials).T
-
-        X_mm[idx:idx + trials, :] = X_block
-        y[idx:idx + trials] = label
-        sessions[idx:idx + trials] = session
-        idx += trials
-
-        print(f"[Pass2] wrote {j}/{len(keep_files)} files | samples written: {idx}/{total_trials}")
-
-    # flush memmap to disk
-    del X_mm
-
-    np.save(y_path, y)
-    np.save(s_path, sessions)
-
-    with open(OUT_DIR / "label_map.json", "w") as f:
-        json.dump(
-            {"0": "non-face (scrambled)", "1": "face (real monkey faces)"},
-            f,
-            indent=2
-        )
-
-    print("✅ Dataset built successfully")
-    print("Saved to:", OUT_DIR)
-    print("X:", (total_trials, n_features))
-    print("y distribution:", np.unique(y, return_counts=True))
-
-
-if __name__ == "__main__":
-    build_face_vs_nonface_dataset()
-'''
     
 def build_X_y(face_file, nonface_file, data_dir):
     """
@@ -357,3 +239,30 @@ def zscore_dataset(X,
     # Apply to each trial
     X_z = (X - mean) / np.maximum(std, eps)
     return X_z, mean, std
+
+
+
+#=====colormap=========
+
+def green_gray_magenta():
+    """
+    Custom diverging colormap:
+    Negative -> green
+    Zero     -> white
+    Positive -> magenta
+    With gray transitions to reduce visual bias.
+    """
+    colors = [
+        (0.0, "green"),
+        (0.1, "darkgray"),
+        (0.3, "lightgray"),
+        (0.5, "white"),
+        (0.7, "lightgray"),
+        (0.9, "darkgray"),
+        (1.0, "magenta"),
+    ]
+
+    return mcolors.LinearSegmentedColormap.from_list(
+        "green_gray_magenta",
+        colors
+    )

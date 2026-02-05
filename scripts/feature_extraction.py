@@ -132,3 +132,16 @@ roi,x=choose_polygon(x_avg[:, 50], pixels=100)
 '''
 
 
+def avgWindow(data_3d):
+    """
+    Reshapes 3D brain data (Pixels, Frames, Trials) into 2D (Trials, avg across frames).
+    """
+    # 1. Ensure 'Trials' is the first dimension
+    # If input is (Pixels, Frames, Trials), move Trials to the front
+    if data_3d.shape[-1] < data_3d.shape[0]: 
+        data_3d = np.moveaxis(data_3d, -1, 0) 
+    n_trials, n_pixels, n_frames = data_3d.shape
+    # 2. Flatten Space and Time into one long vector per trial
+    # Result shape: (60, 5000)
+    X_avgWindow = np.nanmean(data_3d, axis=2) # average over frames
+    return X_avgWindow
