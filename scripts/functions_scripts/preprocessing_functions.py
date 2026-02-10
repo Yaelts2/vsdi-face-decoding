@@ -123,7 +123,7 @@ def normalize_to_clean_blank(blank_cond=3,
                 np.save(out_path, new_mat)
     print(f"Done. Saved blank-normalized files to: {out_dir.resolve()}")
 
-
+'''
 def zscore_all_files(in_dir="data/processed/condsXn",
                     out_dir="data/processed/condsXnZ",
                     zero_frames=(24, 25, 26),   # MATLAB 25:27 -> Python
@@ -155,7 +155,7 @@ def zscore_all_files(in_dir="data/processed/condsXn",
         out_name = file.name.replace("condsXn", "condsXnZ", 1)
         np.save(out_dir / out_name, zmat)
     print(f"Done. Saved Z-scored files to: {out_dir.resolve()}")
-
+'''
 
 
     
@@ -205,40 +205,41 @@ print("y shape:", y.shape)
 '''
 
 
-def zscore_dataset(X,
-                baseline_frames=(1, 25),
-                eps=1e-8
-                ):
-    """
-    Z-score trials using a baseline computed from the
-    MEAN across trials.
 
-    Parameters
-    ----------
-    X : np.ndarray- Shape: (pixels, frames, trials)
-    baseline_frames : tuple - (start, end) frame indices (Python-style)
-    eps : float-   Numerical stability
-
-    Returns
-    -------
-    X_z : np.ndarray-   Same shape as X
-    mean : np.ndarray-  Shape: (pixels, 1, 1)
-    std : np.ndarray-   Shape: (pixels, 1, 1)
+def zscore_dataset_pixelwise_trials(X, baseline_frames=(1, 24), eps: float = 1e-8, ddof: int = 0):
     """
-    #Mean across trials
-    mean_across_trials = np.mean(X, axis=2)                 # (pixels, frames)
-    #Baseline window
+    Pixel-wise Z-score:
+    - baseline MEAN computed per trial
+    - baseline STD pooled across trials
+
+    X shape: (pixels, frames, trials)
+
+    Returns:
+    X_z:   (pixels, frames, trials)
+    mean:  (pixels, 1, trials)
+    std:   (pixels, 1, 1)
+    """
+    X = np.asarray(X, dtype=float)
+    if X.ndim != 3:
+        raise ValueError(f"X must be 3D (pixels, frames, trials). Got {X.shape}")
+
     start, end = baseline_frames
-    baseline_window = mean_across_trials[:, start:end]      # (pixels, baseline_frames)
-    #Pixel-wise baseline statistics
-    mean = np.mean(baseline_window, axis=1, keepdims=True)  # (pixels, 1)
-    std  = np.std(baseline_window, axis=1, keepdims=True)   # (pixels, 1)
-    # reshape for broadcasting
-    mean = mean[:, None]                                    # (pixels, 1, 1)
-    std  = std[:, None]                                     # (pixels, 1, 1)
-    # Apply to each trial
+    if not (0 <= start < end <= X.shape[1]):
+        raise ValueError(f"baseline_frames {baseline_frames} out of bounds")
+
+    # Baseline window
+    baseline = X[:, start:end, :]          # (pixels, B, trials)
+    #Mean per pixel PER TRIAL
+    mean = baseline.mean(axis=1, keepdims=True)   # shape: (pixels, 1, trials)
+
+    #Std per pixel, pooled across trials
+    std = baseline.std(axis=(1, 2), keepdims=True, ddof=ddof)   # shape: (pixels, 1, 1)
+
+    #Z-score
     X_z = (X - mean) / np.maximum(std, eps)
+
     return X_z, mean, std
+
 
 
 

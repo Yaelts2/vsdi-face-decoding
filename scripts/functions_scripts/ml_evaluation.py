@@ -45,7 +45,6 @@ def weights_to_roi_image(w_roi,roi_mask_flat,pixels= 100, fill_value= np.nan,) -
     return full.reshape(pixels, pixels)
 
 
-
 def draw_weight_map(ax, img, cmap= ourCmap, clip= "sym", title= None,
                     show_colorbar= True):
     """
@@ -97,8 +96,6 @@ def draw_weight_map(ax, img, cmap= ourCmap, clip= "sym", title= None,
 
 
 
-
-
 def plot_all_fold_weight_maps(W_outer,roi_mask_flat, pixels = 100,n_cols = 5,
                             cmap= ourCmap, clip= (-0.0002, 0.0002),figsize_per_panel= 3.0):
     """
@@ -137,10 +134,6 @@ def plot_all_fold_weight_maps(W_outer,roi_mask_flat, pixels = 100,n_cols = 5,
 
     plt.tight_layout()
     plt.show()
-
-
-
-
 
 
 
@@ -219,9 +212,6 @@ def plot_weight_stat_maps(W_outer,roi_mask_flat, pixels= 100,cmap_mean= ourCmap,
 
 
 
-
-
-
 def extract_extreme_weight_masks(w_mean,roi_mask_flat, pixels= 100,frac = 0.20):
     """
     Extract top positive and bottom negative weight masks from a mean weight vector.
@@ -281,7 +271,6 @@ def extract_extreme_weight_masks(w_mean,roi_mask_flat, pixels= 100,frac = 0.20):
 
 
 
-
 def average_activation_by_weight_sign(X_roi,roi_mask_flat,
                                     pos_mask_flat,
                                     neg_mask_flat):
@@ -336,9 +325,6 @@ def average_activation_by_weight_sign(X_roi,roi_mask_flat,
     neg_tc = X_neg.mean(axis=(0, 2))   # (n_frames,)
 
     return pos_tc, neg_tc
-
-
-
 
 
 def plot_pos_neg_timecourses(pos_tc, neg_tc, frame_times= None,

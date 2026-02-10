@@ -105,11 +105,11 @@ def plot_accuracy_kfold_bars(
     else:
         plt.plot([mean_x], [mean], "o")
         plt.text(mean_x, mean + 0.02, f"{mean:.2f}", ha="center", va="bottom",
-                 fontsize=12, fontweight="bold")
+                fontsize=12, fontweight="bold")
 
     plt.xticks(list(x) + [mean_x],
-               [f"Fold {i}" for i in x] + ["Mean"],
-               fontsize=12)
+            [f"Fold {i}" for i in x] + ["Mean"],
+            fontsize=12)
 
     plt.ylabel("Accuracy", fontsize=14)
     plt.title(title, fontsize=16, fontweight="bold")
@@ -120,21 +120,104 @@ def plot_accuracy_kfold_bars(
     plt.show()
 
 
-def plot_metric_hist(
-    fold_values,
-    chance: float = 0.5,
-    title: str = "Metric distribution",
-    xlabel: str = "Metric value",
-    figsize=(7, 4),
-    bins: int = 30,
-    xlim=(0, 1),
-):
+def plot_frame_vs_trial_bars(results, chance= 0.5, title: str = "Frame vs Trial accuracy per outer fold",
+                            figsize=(8, 4.5), ylim=(0.4, 1.0), show_mean_sem= True):
+    """
+    Side-by-side bars per outer fold: frame accuracy vs trial (majority vote) accuracy.
+
+    Expects `results` from run_nested_cv_selectC_then_eval with:
+    results["outer_folds"][i]["acc"]       (frame accuracy)
+    results["outer_folds"][i]["acc_trial"] (trial accuracy)
+
+    Plots:
+    - grouped bars per fold
+    - chance line
+    - optional mean ± SEM markers for each series
+    """
+    if not isinstance(results, dict) or "outer_folds" not in results:
+        raise ValueError("results must be a dict with key 'outer_folds' (output of nested CV).")
+
+    folds = results["outer_folds"]
+    if len(folds) == 0:
+        raise ValueError("No outer folds found in results['outer_folds'].")
+
+    acc_frame = np.asarray([f["acc"] for f in folds], dtype=float)
+    acc_trial = np.asarray([f["acc_trial"] for f in folds], dtype=float)
+
+    k = acc_frame.size
+    x = np.arange(k)
+    width = 0.38
+
+    # Means / SEM
+    mean_f = float(np.nanmean(acc_frame))
+    mean_t = float(np.nanmean(acc_trial))
+    sem_f = float(np.nanstd(acc_frame, ddof=1) / np.sqrt(k)) if k > 1 else np.nan
+    sem_t = float(np.nanstd(acc_trial, ddof=1) / np.sqrt(k)) if k > 1 else np.nan
+
+    plt.figure(figsize=figsize)
+    plt.bar(x - width/2, acc_frame, width=width, alpha=0.85, label="Frame acc")
+    plt.bar(x + width/2, acc_trial, width=width, alpha=0.85, label="Trial acc (vote)")
+    plt.axhline(chance, linestyle="--", linewidth=2, label="Chance")
+
+    # Optional mean ± SEM markers (placed to the right)
+    if show_mean_sem:
+        mean_x = k + 0.6
+        # Frame mean
+        if np.isfinite(sem_f):
+            plt.errorbar(mean_x - 0.12, mean_f, yerr=sem_f, fmt="o", capsize=6, linewidth=2)
+            plt.text(mean_x - 0.12, mean_f + 0.02, f"{mean_f:.2f}±{sem_f:.2f}",
+                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+        else:
+            plt.plot([mean_x - 0.12], [mean_f], "o")
+            plt.text(mean_x - 0.12, mean_f + 0.02, f"{mean_f:.2f}",
+                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+
+        # Trial mean
+        if np.isfinite(sem_t):
+            plt.errorbar(mean_x + 0.12, mean_t, yerr=sem_t, fmt="o", capsize=6, linewidth=2)
+            plt.text(mean_x + 0.12, mean_t + 0.02, f"{mean_t:.2f}±{sem_t:.2f}",
+                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+        else:
+            plt.plot([mean_x + 0.12], [mean_t], "o")
+            plt.text(mean_x + 0.12, mean_t + 0.02, f"{mean_t:.2f}",
+                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+
+        # Extend x-axis ticks to include "Mean"
+        plt.xticks(
+            list(x) + [mean_x],
+            [f"Fold {i+1}" for i in range(k)] + ["Mean"],
+            fontsize=12
+        )
+        plt.xlim(-0.6, mean_x + 0.8)
+    else:
+        plt.xticks(x, [f"Fold {i+1}" for i in range(k)], fontsize=12)
+
+    plt.ylabel("Accuracy", fontsize=14)
+    plt.title(title, fontsize=16, fontweight="bold")
+    if ylim is not None:
+        plt.ylim(ylim[0], ylim[1])
+
+    plt.legend(fontsize=11, frameon=False)
+    plt.tight_layout()
+    plt.show()
+
+
+
+
+#############################################
+
+def plot_metric_hist(fold_values,chance= 0.5,
+                    title= "Metric distribution",
+                    xlabel = "Metric value",
+                    figsize=(7, 4),
+                    bins = 30,
+                    xlim=(0, 1)):
     """
     Histogram of many-fold distributions (e.g., LOPO with many folds).
 
     fold_values can be:
-      - list/array of values
-      - results dict (will use acc by default)
+    - list/array of values
+    - results dict (will use acc by default)
     """
     if isinstance(fold_values, dict):
         v = get_fold_values(fold_values, key="acc")

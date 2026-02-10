@@ -3,11 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Any
-
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Any
 from joblib import Parallel, delayed
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 
@@ -272,6 +269,7 @@ def leave_one_group_pair_out_splits(y, groups, seed=0):
         
         
         
+        
 # -----------------------------
 # Main CV runner
 # -----------------------------
@@ -443,9 +441,11 @@ def choose_final_C(chosen_Cs: Sequence[float], method: str = "mode_then_median")
     raise ValueError("method must be 'median', 'mode', or 'mode_then_median'")
 
 
+
+
 def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter,
                                     C_grid=None,
-                                    metric: str = "acc",tie_break: str = "smaller_C",rule: str = "one_se",
+                                    metric: str = "acc", tie_break: str = "smaller_C", rule: str = "one_se",
                                     n_jobs_inner: int = 1,
                                     verbose: bool = True,
                                     ) -> Dict[str, Any]:
@@ -453,11 +453,6 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
     Nested CV:
     Outer: evaluate generalization (GroupKFold on trials)
     Inner: select C using only outer-train data
-
-    Returns a dict with:
-    - outer fold metrics
-    - outer OOF predictions/scores (for confusion matrix + ROC)
-    - chosen_Cs and recommended final_C
     """
     X = np.asarray(X)
     y = np.asarray(y).astype(int)
@@ -478,17 +473,20 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
         X_tr, y_tr, g_tr = X[tr_idx], y[tr_idx], groups[tr_idx]
         X_te, y_te       = X[te_idx], y[te_idx]
 
-        best_C, rows, _info = select_best_C(X_tr, y_tr,
-                                            splitter=inner_splitter,
-                                            groups=g_tr,
-                                            C_grid=C_grid,
-                                            metric=metric,
-                                            tie_break=tie_break,
-                                            rule=rule,
-                                            expect_full_coverage=False,
-                                            n_jobs=n_jobs_inner,
-                                            verbose=False,
-                                            make_estimator_for_C=lambda C: make_linear_svm(C))
+        # nest C on outer-train (inner splitter)
+        best_C, rows, _info = select_best_C(
+            X_tr, y_tr,
+            splitter=inner_splitter,
+            groups=g_tr,
+            C_grid=C_grid,
+            metric=metric,
+            tie_break=tie_break,
+            rule=rule,
+            expect_full_coverage=False,
+            n_jobs=n_jobs_inner,
+            verbose=False,
+            make_estimator_for_C=lambda C: make_linear_svm(C)
+        )
         chosen_Cs.append(float(best_C))
 
         clf = make_linear_svm(best_C)
@@ -497,6 +495,21 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
         y_pred = clf.predict(X_te)
         acc = float(np.mean(y_pred == y_te))
         auc, scores = compute_auc(clf, X_te, y_te)
+
+        # --- accuracy across trials (majority vote across frames) ---
+        g_te = groups[te_idx]
+        trial_ids = np.unique(g_te)
+        y_pred_trial = np.empty(trial_ids.size, dtype=int)
+        y_true_trial = np.empty(trial_ids.size, dtype=int)
+
+        for i, g in enumerate(trial_ids):
+            idx = (g_te == g)               # frames belonging to this trial (within test set)
+            y_true_trial[i] = y_te[idx][0]  # true label of the trial
+            votes = y_pred[idx].astype(int) # predicted labels for frames in this trial
+            y_pred_trial[i] = np.bincount(votes).argmax()
+
+        acc_trial = float(np.mean(y_pred_trial == y_true_trial))
+        # ----------------------------------------------------------
 
         # Fill OOF
         te_idx = np.asarray(te_idx, dtype=int)
@@ -514,18 +527,20 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
             "best_C": float(best_C),
             "acc": float(acc),
             "auc": float(auc) if np.isfinite(auc) else np.nan,
+            "acc_trial": float(acc_trial),
             "n_test": int(len(te_idx)),
         })
 
         if verbose:
             auc_txt = f"{auc:.4f}" if np.isfinite(auc) else "nan"
-            print(f"[Outer {fold_idx}] C={best_C:g} | acc={acc:.4f} | auc={auc_txt} | n_test={len(te_idx)}")
+            print(f"[Outer {fold_idx}] C={best_C:g} | acc={acc:.4f} | auc={auc_txt} | acc_trial={acc_trial:.4f} | n_test={len(te_idx)}")
 
     if np.any(oof_pred < 0):
         raise RuntimeError("Outer OOF aggregation failed: some samples never tested.")
 
     accs = np.asarray([f["acc"] for f in outer_folds], dtype=float)
     aucs = np.asarray([f["auc"] for f in outer_folds], dtype=float)
+    acc_trials = np.asarray([f["acc_trial"] for f in outer_folds], dtype=float)
 
     final_C = choose_final_C(chosen_Cs, method="mode_then_median")
 
@@ -535,10 +550,14 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
         "outer_acc_std": float(np.std(accs, ddof=1)) if accs.size > 1 else np.nan,
         "outer_auc_mean": float(np.nanmean(aucs)),
         "outer_auc_std": float(np.nanstd(aucs, ddof=1)) if np.sum(np.isfinite(aucs)) > 1 else np.nan,
+
+        "outer_acc_trial_mean": float(np.mean(acc_trials)),
+        "outer_acc_trial_std": float(np.std(acc_trials, ddof=1)) if acc_trials.size > 1 else np.nan,
+
         "chosen_Cs": chosen_Cs,
         "final_C": float(final_C),
 
-        # OOF for figures
+        # OOF for figures (frame-level)
         "oof_y_true": y,
         "oof_pred": oof_pred,
         "oof_scores": oof_scores,
@@ -546,18 +565,21 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
         "confusion_matrix": confusion_matrix(y, oof_pred),
     }
 
-    #mean fold weights (stability map)
+    # mean fold weights (stability map)
     if len(fold_weights) > 0:
         W = np.stack(fold_weights, axis=0)   # (n_folds, n_roi_pixels)
-        out["W_outer"] = W  # keep per-fold weights
+        out["W_outer"] = W
         out["w_outer_mean"] = W.mean(axis=0)
-        out["w_outer_std"]  = W.std(axis=0, ddof=1) if W.shape[0] > 1 else np.full(W.shape[1], np.nan)
+        out["w_outer_std"] = W.std(axis=0, ddof=1) if W.shape[0] > 1 else np.full(W.shape[1], np.nan)
     else:
-        out["W_outer"] = None 
+        out["W_outer"] = None
         out["w_outer_mean"] = None
         out["w_outer_std"] = None
 
     return out
+
+
+
 
 
 def fit_final_model(X, y, C_final: float) -> Dict[str, Any]:

@@ -11,27 +11,7 @@ from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 
 
-def frames_as_samples(data_3d,y_trials, trial_axis=-1, frame_axis=1, pixel_axis=0):
-    """
-    Convert (Pixels, Frames, Trials) into frame-level samples:
-    X:      (Trials*Frames, Pixels)
-    groups: (Trials*Frames,)   trial id repeated for each frame
 
-    Default assumes input is (Pixels, Frames, Trials).
-    """
-    data_3d = np.asarray(data_3d)
-
-    # Reorder to (Trials, Frames, Pixels)
-    x = np.moveaxis(data_3d, (trial_axis, frame_axis, pixel_axis), (0, 1, 2))
-    n_trials, n_frames, n_pixels = x.shape
-
-    # X: each frame is a sample, features are pixels
-    X = x.reshape(n_trials * n_frames, n_pixels)
-
-    # groups: keep frames from the same trial together
-    groups = np.repeat(np.arange(n_trials), n_frames)
-    y_frames = np.repeat(y_trials, n_frames) #n_frames in the window
-    return X,y_frames, groups
 
 '''
 def split_data(X, y, test_size=0.3):
