@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
+from functions_scripts import ml_plots as pl
 
 
 def frames_as_samples(data_3d,y_trials, trial_axis=-1, frame_axis=1, pixel_axis=0):
@@ -40,9 +41,9 @@ def creat_ROI(map_flat, pixels=100):
         mask_flat : (pixels*pixels,) bool
         roi_idx   : indices where mask == True
     """
-    fig, axes_flat = mimg(map_flat.reshape(-1, 1) - 1,
+    fig, axes_flat = pl.mimg(map_flat.reshape(-1, 1) - 1,
                         xsize=pixels, ysize=pixels,
-                        low=-0.0009, high=0.003)
+                        low=-0.0005, high=0.002)
     ax = axes_flat[0]
     ax.set_title("ROI: left click = add point, right click = finish")
     # show + make sure GUI is ready BEFORE ginput
@@ -77,9 +78,9 @@ x_avg = x.mean(axis=2)
 print(x_avg.shape)
 x_avg_frames =  x_avg[:, 55:65]
 print(x_avg_frames.shape)
-mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003)
+pl.mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003)
 
-roi,x=choose_polygon(x_avg[:, 50], pixels=100)
+roi,x= fe.creat_ROI(x_avg[:, 50], pixels=100)
 '''
 
 

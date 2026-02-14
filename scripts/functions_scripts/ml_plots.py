@@ -1,22 +1,222 @@
-# ml_plots.py
-# Plotting utilities compatible with the cv framework in ml_cv.py
-#
-# Design goals:
-# - No training / CV logic here (only plotting)
-# - Works with both:
-#     * single-layer run_cv outputs (results["folds"], results["oof_*"])
-#     * nested outputs (nested["outer_folds"], nested["oof_*"])
-# - Weight plots take weight vectors (w) instead of estimator objects (Pipeline-safe)
-#
-# Requirements:
-# - feature_extraction.mimg must exist (your VSDI image helper)
-
 from __future__ import annotations
-
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, roc_curve, auc
-from feature_extraction import mimg
+from functions_scripts.preprocessing_functions import green_gray_magenta
+ourCmap = green_gray_magenta()
+
+
+#------------------------------
+#Data image plots
+#------------------------------
+
+def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
+                        overlay: bool = True,
+                        title: str | None = None,
+                        ylim: tuple[float, float] | None = None,
+                        xlim: tuple[float, float] | None = None,
+                        enable_popout: bool = True,
+                        popout_double_click: bool = True,
+                        popout_figsize: tuple[float, float] = (7, 4.5)):
+    """
+    Plot mean time-traces from spatial "superpixels" (binned blocks) of a 2D map.
+
+    Input
+    data : np.ndarray
+        Shape:
+        - (pixels, frames) or
+        - (pixels, frames, conditions)
+        Example: (10000, 120) where 10000 = 100*100.
+
+    Binning
+    The map is reshaped to (ys, xs, frames) and split into a grid of blocks.
+    Block size is floor(xs/nsubplots) by floor(ys/nsubplots).
+    Each subplot shows the mean trace of one block.
+
+    Popout
+    If enable_popout=True: double-click any subplot to open a larger figure
+    with visible axes and tick labels.
+
+    Returns
+    binned : np.ndarray
+        Shape (nplots, frames, nconds) where nplots = nrows*ncols.
+    fig : matplotlib.figure.Figure
+    axes : np.ndarray of Axes, shape (nrows, ncols)
+    cid : callback id for the popout handler (or None)
+    """
+    X = np.asarray(data)
+    if X.ndim == 2:
+        X = X[:, :, None]  # (pixels, frames, 1)
+    if X.ndim != 3:
+        raise ValueError("data must be (pixels, frames) or (pixels, frames, conditions).")
+
+    npix, nframes, nconds = X.shape
+
+    # Infer xs, ys if not provided (must be a perfect square)
+    if xs is None or ys is None:
+        side = int(round(np.sqrt(npix)))
+        if side * side != npix:
+            raise ValueError(f"npix={npix} is not a perfect square. Provide xs and ys.")
+        xs = side if xs is None else xs
+        ys = side if ys is None else ys
+
+    if xs * ys != npix:
+        raise ValueError(f"pixels ({npix}) != xs*ys ({xs*ys}). Check xs/ys.")
+
+    # MATLAB-style: pixperplot = floor(xs / nsubplots)
+    xbin = int(xs // nsubplots)
+    ybin = int(ys // nsubplots)
+    if xbin < 1 or ybin < 1:
+        raise ValueError("nsubplots is too large for this map size.")
+
+    ncols = xs // xbin
+    nrows = ys // ybin
+
+    # Effective size (cropping like MATLAB fix())
+    xs_eff = ncols * xbin
+    ys_eff = nrows * ybin
+
+    # -------- Vectorized binning (no loops over pixels) --------
+    # Convert (pixels, frames, conds) -> (ys, xs, frames, conds)
+    img = X.reshape(ys, xs, nframes, nconds)
+
+    # Crop to multiples of bin size
+    img = img[:ys_eff, :xs_eff, :, :]  # (ys_eff, xs_eff, frames, conds)
+
+    # Block mean:
+    # (nrows, ybin, ncols, xbin, frames, conds) -> mean over ybin & xbin
+    b = img.reshape(nrows, ybin, ncols, xbin, nframes, nconds).mean(axis=(1, 3))
+    # b shape: (nrows, ncols, frames, conds)
+
+    # Flatten blocks into (nplots, frames, conds)
+    binned = b.reshape(nrows * ncols, nframes, nconds)
+
+    # -------- Plotting --------
+    fig_w = max(6, 2.2 * ncols)
+    fig_h = max(6, 2.2 * nrows)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_w, fig_h), sharex=True, sharey=True)
+    axes = np.asarray(axes).reshape(nrows, ncols)
+
+    if title:
+        fig.suptitle(title, y=0.99)
+
+    for r in range(nrows):
+        for c in range(ncols):
+            i = r * ncols + c
+            ax = axes[r, c]
+
+            # Tiny-subplot style (like your MATLAB): no tick labels
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            if overlay:
+                for k in range(nconds):
+                    ax.plot(binned[i, :, k], linewidth=1.0)
+            else:
+                ax.plot(binned[i, :, 0], linewidth=1.0)
+
+            if ylim is not None:
+                ax.set_ylim(*ylim)
+            if xlim is not None:
+                ax.set_xlim(*xlim)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+    # -------- Optional: double-click popout --------
+    cid = None
+    if enable_popout:
+        ax_to_idx = {axes[r, c]: (r * ncols + c) for r in range(nrows) for c in range(ncols)}
+
+        def _on_click(event):
+            if popout_double_click and not getattr(event, "dblclick", False):
+                return
+            ax = event.inaxes
+            if ax is None or ax not in ax_to_idx:
+                return
+
+            i = ax_to_idx[ax]
+            rr, cc = divmod(i, ncols)
+
+            pop_fig, pop_ax = plt.subplots(figsize=popout_figsize)
+            pop_ax.set_title(f"Superpixel {i} (row={rr}, col={cc})")
+            pop_ax.set_xlabel("Frame")
+            pop_ax.set_ylabel("Activation")
+
+            if overlay and nconds > 1:
+                for k in range(nconds):
+                    pop_ax.plot(binned[i, :, k], linewidth=1.6, label=f"cond {k}")
+                pop_ax.legend(loc="best", frameon=False)
+            else:
+                pop_ax.plot(binned[i, :, 0], linewidth=1.8)
+
+            # Make axes readable
+            pop_ax.spines["top"].set_visible(False)
+            pop_ax.spines["right"].set_visible(False)
+
+            if ylim is not None:
+                pop_ax.set_ylim(*ylim)
+            if xlim is not None:
+                pop_ax.set_xlim(*xlim)
+
+            pop_fig.tight_layout()
+            pop_fig.show()
+
+        cid = fig.canvas.mpl_connect("button_press_event", _on_click)
+
+    return binned, fig, axes, cid
+
+
+
+def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
+    # if looking in raw data (not Zscored), data needs to substract 1  (-1)
+    if x.ndim == 1:
+        x = x.reshape(-1, 1)
+    m, n = x.shape
+    if width <= 0:
+        width = int(np.ceil(np.sqrt(n)))
+    height = int(np.ceil(n / width))
+    # Handle Clipping
+    if isinstance(low, str) and low.lower() == 'auto':
+        v_mins, v_maxs = [None] * n, [None] * n
+    elif isinstance(low, str) and low.lower() == 'all':
+        v_mins, v_maxs = [np.min(x)] * n, [np.max(x)] * n
+    else:
+        v_mins = np.full(n, low) if np.isscalar(low) else low
+        v_maxs = np.full(n, high) if np.isscalar(high) else high
+    fig, axes = plt.subplots(height, width, figsize=(width*3, height*3), squeeze=False)
+    axes_flat = axes.flatten()
+    for i in range(n):
+        ax = axes_flat[i]
+        # 1. Reshape using 'C' order because your data is "ordered by rows"
+        # 2. We reshape as (xsize, ysize) or (ysize, xsize) depending on the source
+        img_data = x[:, i].reshape((ysize, xsize), order='C')
+        # Use 'jet' or 'nipy_spectral' 
+        im = ax.imshow(img_data, cmap=ourCmap, vmin=v_mins[i], vmax=v_maxs[i], origin='upper')
+        ax.axis('off')
+        # Add frame numbers if provided
+        if frames is not None:
+            ax.set_title(f"frame {frames[i]}", fontsize=6)
+    # Hide extra subplots
+    for j in range(i + 1, len(axes_flat)):
+        axes_flat[j].axis('off')
+    plt.tight_layout()
+    return fig,axes_flat
+
+#example usage
+'''
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_270109b.npy")
+x_avg = x.mean(axis=2)
+x_avg_frames =  x_avg[:, 25:120]
+fig,axes_flat =mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=range(25,120))
+plt.show()
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_270109b.npy")
+x_avg = x.mean(axis=2)
+x_avg_frames =  x_avg[:, 25:120]
+fig,axes_flat =mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=range(25,120))
+plt.show()
+'''
+
+
 
 
 # -----------------------------

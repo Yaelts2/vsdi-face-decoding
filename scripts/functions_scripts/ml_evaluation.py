@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import math
-from preprocessing_functions import green_gray_magenta
+from functions_scripts.preprocessing_functions import green_gray_magenta
 
 ourCmap = green_gray_magenta()
 
@@ -354,3 +353,47 @@ def plot_pos_neg_timecourses(pos_tc, neg_tc, frame_times= None,
     plt.legend()
     plt.tight_layout()
     plt.show()
+
+
+
+
+
+########## funciton for sliding window weight analysis 
+def window_weights_to_pixel_time_matrix(w_mean_windows: np.ndarray,   # (n_windows, n_roi_pixels)
+                                        roi_mask_flat: np.ndarray,    # (pixels*pixels,)
+                                        pixels: int = 100,
+                                        fill_value=np.nan ) -> np.ndarray:
+    """
+    Convert window-averaged ROI weights into a full-image pixel-by-time matrix.
+
+    Returns
+    -------
+    W_pixel_time : np.ndarray
+        Shape: (pixels*pixels, n_windows)
+        Each column is one window.
+        Rows correspond to flattened image pixels.
+    """
+
+    w_mean_windows = np.asarray(w_mean_windows, dtype=float)
+    if w_mean_windows.ndim != 2:
+        raise ValueError("w_mean_windows must be 2D: (n_windows, n_roi_pixels)")
+
+    n_windows, n_roi = w_mean_windows.shape
+
+    mask = np.asarray(roi_mask_flat, dtype=bool).ravel()
+    if mask.size != pixels * pixels:
+        raise ValueError(f"roi_mask_flat must have size {pixels*pixels}, got {mask.size}")
+
+    if int(mask.sum()) != n_roi:
+        raise ValueError(
+            f"Mask ROI pixels {int(mask.sum())} != weights features {n_roi}"
+        )
+
+    # Initialize full pixel × time matrix
+    W_pixel_time = np.full((pixels * pixels, n_windows), fill_value, dtype=float)
+
+    # Fill ROI pixels for each window
+    for i in range(n_windows):
+        W_pixel_time[mask, i] = w_mean_windows[i]
+
+    return W_pixel_time
