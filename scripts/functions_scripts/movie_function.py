@@ -2,8 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
 from functions_scripts.preprocessing_functions import green_gray_magenta
-
 ourCmap = green_gray_magenta()
+
+
 
 def show_weight_movie(W_pixel_time,                 # (pixels*pixels, n_windows) e.g. (10000, 106)
                     centers=None,                 # (n_windows,) optional (center frame per window)

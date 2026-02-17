@@ -1,8 +1,6 @@
 # ml_cv.py
 from __future__ import annotations
-
 import numpy as np
-from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Any
 from joblib import Parallel, delayed
 from sklearn.svm import LinearSVC
@@ -12,7 +10,6 @@ from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 # -----------------------------
 # Model factories
 # -----------------------------
-
 def make_linear_svm(C: float = 0.001, max_iter: int = 10000) -> LinearSVC:
     return LinearSVC(C=C, dual=True, max_iter=max_iter)
 
@@ -20,7 +17,6 @@ def make_linear_svm(C: float = 0.001, max_iter: int = 10000) -> LinearSVC:
 # -----------------------------
 # Scoring utilities
 # -----------------------------
-
 def compute_auc(estimator, X_test, y_true) -> Tuple[float, Optional[np.ndarray]]:
     """
     Compute ROC-AUC for binary classification with best-effort score extraction.
@@ -57,7 +53,6 @@ def compute_auc(estimator, X_test, y_true) -> Tuple[float, Optional[np.ndarray]]
 # -----------------------------
 # Split utilities
 # -----------------------------
-
 def get_splits(splitter, X, y, groups=None):
     """
     Normalize a splitter into a list of (train_idx, test_idx).
@@ -103,8 +98,6 @@ def get_splits(splitter, X, y, groups=None):
     return splits
 
 
-
-
 def has_full_test_coverage(splits: Sequence[Tuple[np.ndarray, np.ndarray]], n_samples: int) -> bool:
     """
     True iff each sample appears in exactly one test fold.
@@ -120,18 +113,48 @@ def has_full_test_coverage(splits: Sequence[Tuple[np.ndarray, np.ndarray]], n_sa
 # -----------------------------
 # Linear weights (for maps)
 # -----------------------------
-
-def extract_linear_weights(estimator):
+def extract_linear_weights_general(estimator):
     """
-    Extract linear weights from:
-    - a LinearSVC (returns estimator.coef_)
-    - optionally, a Pipeline with a 'clf' step (returns pipeline.named_steps['clf'].coef_)
-    Returns a 1D weight vector, or None if not available.
+    Robust weight extraction:
+    - If estimator is a Pipeline, tries named_steps["clf"]
+    - Otherwise uses estimator.coef_
+    Returns 1D weight vector (n_features,)
     """
-    # Case 1: plain estimator (e.g., LinearSVC)
+    # Pipeline case
+    if hasattr(estimator, "named_steps"):
+        if "clf" in estimator.named_steps and hasattr(estimator.named_steps["clf"], "coef_"):
+            return np.asarray(estimator.named_steps["clf"].coef_).ravel()
+        # fallback: find any step with coef_
+        for step in estimator.named_steps.values():
+            if hasattr(step, "coef_"):
+                return np.asarray(step.coef_).ravel()
+        return None
+    # Plain estimator
     if hasattr(estimator, "coef_"):
         return np.asarray(estimator.coef_).ravel()
     return None
+
+
+# ------------------------------
+# Trial-level aggregation (majority vote) from frame-level predictions
+# ------------------------------
+def majority_vote_trial_predictions(y_pred, y_true, groups):
+    # 1. Get trial IDs and an index mapping every frame to its trial
+    trial_ids, inverse = np.unique(groups, return_inverse=True)
+    n_trials = trial_ids.size
+    
+    y_pred_trials = np.empty(n_trials, dtype=int)
+    y_true_trials = np.empty(n_trials, dtype=int)
+
+    # 2. Iterate using the pre-calculated inverse indices
+    for i in range(n_trials):
+        idx = (inverse == i)
+        # Take the first true label (assumes trial labels are consistent)
+        y_true_trials[i] = y_true[idx][0]
+        # Majority vote (works for binary and multiclass)
+        y_pred_trials[i] = np.bincount(y_pred[idx]).argmax()
+
+    return y_true_trials, y_pred_trials
 
 
 # -----------------------------
@@ -161,7 +184,7 @@ def fit_eval_one_fold(
 
     auc, scores = compute_auc(est, X_te, y_te)
 
-    w = extract_linear_weights(est)
+    w = extract_linear_weights_general(est)
 
     return {
         "fold": int(fold_idx),
@@ -264,9 +287,6 @@ def leave_one_group_pair_out_splits(y, groups, seed=0):
     for gp, gn in zip(pos_g[:m], neg_g[:m]):
         test = (groups == gp) | (groups == gn)
         yield all_idx[~test], all_idx[test]
-        
-        
-        
         
         
         
@@ -442,7 +462,6 @@ def choose_final_C(chosen_Cs: Sequence[float], method: str = "mode_then_median")
 
 
 
-
 def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter,
                                     C_grid=None,
                                     metric: str = "acc", tie_break: str = "smaller_C", rule: str = "one_se",
@@ -471,22 +490,20 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
 
     for fold_idx, (tr_idx, te_idx) in enumerate(outer_splits):
         X_tr, y_tr, g_tr = X[tr_idx], y[tr_idx], groups[tr_idx]
-        X_te, y_te       = X[te_idx], y[te_idx]
+        X_te, y_te = X[te_idx], y[te_idx]
 
         # nest C on outer-train (inner splitter)
-        best_C, rows, _info = select_best_C(
-            X_tr, y_tr,
-            splitter=inner_splitter,
-            groups=g_tr,
-            C_grid=C_grid,
-            metric=metric,
-            tie_break=tie_break,
-            rule=rule,
-            expect_full_coverage=False,
-            n_jobs=n_jobs_inner,
-            verbose=False,
-            make_estimator_for_C=lambda C: make_linear_svm(C)
-        )
+        best_C, rows, _info = select_best_C(X_tr, y_tr,
+                                            splitter=inner_splitter,
+                                            groups=g_tr,
+                                            C_grid=C_grid,
+                                            metric=metric,
+                                            tie_break=tie_break,
+                                            rule=rule,
+                                            expect_full_coverage=False,
+                                            n_jobs=n_jobs_inner,
+                                            verbose=False,
+                                            make_estimator_for_C=lambda C: make_linear_svm(C))
         chosen_Cs.append(float(best_C))
 
         clf = make_linear_svm(best_C)
@@ -496,18 +513,9 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
         acc = float(np.mean(y_pred == y_te))
         auc, scores = compute_auc(clf, X_te, y_te)
 
-        # --- accuracy across trials (majority vote across frames) ---
+        #accuracy across trials (majority vote across frames)
         g_te = groups[te_idx]
-        trial_ids = np.unique(g_te)
-        y_pred_trial = np.empty(trial_ids.size, dtype=int)
-        y_true_trial = np.empty(trial_ids.size, dtype=int)
-
-        for i, g in enumerate(trial_ids):
-            idx = (g_te == g)               # frames belonging to this trial (within test set)
-            y_true_trial[i] = y_te[idx][0]  # true label of the trial
-            votes = y_pred[idx].astype(int) # predicted labels for frames in this trial
-            y_pred_trial[i] = np.bincount(votes).argmax()
-
+        y_true_trial, y_pred_trial= majority_vote_trial_predictions(y_pred, y_te, g_te)
         acc_trial = float(np.mean(y_pred_trial == y_true_trial))
         # ----------------------------------------------------------
 
@@ -518,7 +526,7 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
             oof_scores[te_idx] = np.asarray(scores, dtype=float)
 
         # Weights (only for linear models)
-        w = extract_linear_weights(clf)
+        w = extract_linear_weights_general(clf)
         if w is not None:
             fold_weights.append(w)
 
@@ -581,7 +589,6 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
 
 
 
-
 def fit_final_model(X, y, C_final: float) -> Dict[str, Any]:
     """
     Fit the final linear SVM on all data using C_final and return model + weights.
@@ -590,5 +597,5 @@ def fit_final_model(X, y, C_final: float) -> Dict[str, Any]:
     y = np.asarray(y).astype(int)
     est = make_linear_svm(C_final)
     est.fit(X, y)
-    w = extract_linear_weights(est)
+    w = extract_linear_weights_general(est)
     return {"estimator": est, "C": float(C_final), "w_scaled": w_scaled, "w": w}

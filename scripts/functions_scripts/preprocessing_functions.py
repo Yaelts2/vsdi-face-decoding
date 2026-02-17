@@ -4,6 +4,7 @@ from scipy.io import loadmat
 import json
 import matplotlib.colors as mcolors
 
+
 def split_conds_files(raw_dir="data/raw_mat",
                     out_dir="data/processed/all_conds_npy",
                     overwrite=False,

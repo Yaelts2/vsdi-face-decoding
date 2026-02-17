@@ -1,7 +1,11 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import accuracy_score
 from functions_scripts import feature_extraction as fe
+from functions_scripts import ml_cv as cv
+from functions_scripts import ml_evaluation as ev
+
 
 def _sem(x) -> float:
     x = np.asarray(x, dtype=float)
@@ -9,65 +13,6 @@ def _sem(x) -> float:
     if x.size <= 1:
         return np.nan
     return float(np.std(x, ddof=1) / np.sqrt(x.size))
-
-
-def majority_vote_trial_predictions(y_pred_frames, y_true_frames, groups_test):
-    """
-    Convert frame-level predictions into trial-level predictions by majority vote.
-    Ties are broken by favoring class 1 if sums are equal; you can change this.
-
-    Returns
-    -------
-    y_true_trials : (n_test_trials,)
-    y_pred_trials : (n_test_trials,)
-    """
-    y_pred_frames = np.asarray(y_pred_frames).astype(int)
-    y_true_frames = np.asarray(y_true_frames).astype(int)
-    groups_test = np.asarray(groups_test).astype(int)
-
-    trial_ids = np.unique(groups_test)
-    y_true_trials = []
-    y_pred_trials = []
-
-    for tid in trial_ids:
-        mask = (groups_test == tid)
-        yt = y_true_frames[mask]
-        yp = y_pred_frames[mask]
-
-        # True label should be constant within a trial
-        y_true_trials.append(int(np.round(np.mean(yt))))
-
-        # Majority vote (binary). For multiclass, use bincount argmax.
-        # Tie-break: class 1 if equal counts (can change)
-        n1 = int(np.sum(yp == 1))
-        n0 = int(np.sum(yp == 0))
-        pred = 1 if n1 >= n0 else 0
-        y_pred_trials.append(pred)
-
-    return np.asarray(y_true_trials), np.asarray(y_pred_trials)
-
-
-def extract_linear_weights_general(estimator):
-    """
-    Robust weight extraction:
-    - If estimator is a Pipeline, tries named_steps["clf"]
-    - Otherwise uses estimator.coef_
-    Returns 1D weight vector (n_features,)
-    """
-    # Pipeline case
-    if hasattr(estimator, "named_steps"):
-        if "clf" in estimator.named_steps and hasattr(estimator.named_steps["clf"], "coef_"):
-            return np.asarray(estimator.named_steps["clf"].coef_).ravel()
-        # fallback: find any step with coef_
-        for step in estimator.named_steps.values():
-            if hasattr(step, "coef_"):
-                return np.asarray(step.coef_).ravel()
-        return None
-    # Plain estimator
-    if hasattr(estimator, "coef_"):
-        return np.asarray(estimator.coef_).ravel()
-
-    return None
 
 
 def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, trials)  e.g. (8518, 256, 56)
@@ -134,14 +79,14 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
             fold_acc_f.append(float(acc_f))
 
             # (2) trial-level accuracy by majority vote across frames per trial
-            y_true_trials, y_pred_trials = majority_vote_trial_predictions(y_pred_frames=y_pred,
-                                                                        y_true_frames=y_frames[te_idx],
-                                                                        groups_test=groups[te_idx])
-            acc_t = accuracy_score(y_true_trials, y_pred_trials)
+            y_true_trial, y_pred_trial= cv.majority_vote_trial_predictions(y_pred,
+                                                                        y_frames[te_idx],
+                                                                        groups[te_idx])
+            acc_t = accuracy_score(y_true_trial, y_pred_trial)
             fold_acc_t.append(float(acc_t))
 
             # (3) weights
-            w = extract_linear_weights_general(clf)
+            w = cv.extract_linear_weights_general(clf)
             if w is None:
                 raise ValueError("Estimator does not expose linear weights (coef_).")
             W_folds.append(w)
@@ -181,13 +126,7 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
     }
     if return_fold_weights:
         out["W_folds_per_window"] = fold_weights_all  # list length n_windows, each (n_splits, n_features)
-
     return out
-
-
-
-import numpy as np
-import matplotlib.pyplot as plt
 
 
 def plot_sliding_window_accuracy_with_sem(res: dict,
@@ -246,4 +185,5 @@ def plot_sliding_window_accuracy_with_sem(res: dict,
     plt.legend()
     plt.tight_layout()
     plt.show()
+
 

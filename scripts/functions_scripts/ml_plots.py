@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, roc_curve, auc
-from functions_scripts.preprocessing_functions import green_gray_magenta
+from .preprocessing_functions import green_gray_magenta
 ourCmap = green_gray_magenta()
 
 

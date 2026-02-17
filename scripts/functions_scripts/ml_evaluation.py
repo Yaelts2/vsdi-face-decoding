@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from functions_scripts.preprocessing_functions import green_gray_magenta
-
+from .preprocessing_functions import green_gray_magenta
 ourCmap = green_gray_magenta()
 
 
@@ -94,7 +93,6 @@ def draw_weight_map(ax, img, cmap= ourCmap, clip= "sym", title= None,
     return im
 
 
-
 def plot_all_fold_weight_maps(W_outer,roi_mask_flat, pixels = 100,n_cols = 5,
                             cmap= ourCmap, clip= (-0.0002, 0.0002),figsize_per_panel= 3.0):
     """
@@ -133,7 +131,6 @@ def plot_all_fold_weight_maps(W_outer,roi_mask_flat, pixels = 100,n_cols = 5,
 
     plt.tight_layout()
     plt.show()
-
 
 
 def compute_weight_stats_across_folds(W_outer, eps= 1e-12) -> dict:
@@ -269,7 +266,6 @@ def extract_extreme_weight_masks(w_mean,roi_mask_flat, pixels= 100,frac = 0.20):
     return pos_mask_flat, neg_mask_flat
 
 
-
 def average_activation_by_weight_sign(X_roi,roi_mask_flat,
                                     pos_mask_flat,
                                     neg_mask_flat):
@@ -397,3 +393,90 @@ def window_weights_to_pixel_time_matrix(w_mean_windows: np.ndarray,   # (n_windo
         W_pixel_time[mask, i] = w_mean_windows[i]
 
     return W_pixel_time
+
+
+def extract_extreme_weight_masks_sliding(W_img: np.ndarray,
+                                        ROI_mask: np.ndarray,
+                                        frac: float = 0.20,
+                                        strict_sign: bool = True):
+    """
+    Sliding-window extreme-weight masks.
+
+    For each window (column) in W_img, select:
+    - top `frac` of POSITIVE weights within ROI  -> pos mask
+    - bottom `frac` of NEGATIVE weights within ROI -> neg mask
+
+    Parameters
+    ----------
+    W_img : np.ndarray, shape (10000, n_windows)
+        Weight maps in full-image space for each window.
+    ROI_mask : np.ndarray, shape (10000,) or (10000,1)
+        Boolean ROI mask in full-image space.
+    frac : float
+        Fraction to select from each tail (e.g., 0.20 = 20%).
+    strict_sign : bool
+        If True: positive mask uses only weights > 0; negative mask uses only weights < 0.
+        If False: thresholds are computed over ROI weights regardless of sign (less recommended here).
+
+    Returns
+    -------
+    pos_mask_mat : np.ndarray, shape (10000, n_windows), dtype=bool
+    neg_mask_mat : np.ndarray, shape (10000, n_windows), dtype=bool
+    pos_thresh : np.ndarray, shape (n_windows,), dtype=float
+        Threshold used for positive selection (NaN if no positives in ROI for that window).
+    neg_thresh : np.ndarray, shape (n_windows,), dtype=float
+        Threshold used for negative selection (NaN if no negatives in ROI for that window).
+    """
+    W_img = np.asarray(W_img, dtype=float)
+    ROI_mask = np.asarray(ROI_mask, dtype=bool).ravel()
+
+    if W_img.ndim != 2:
+        raise ValueError(f"W_img must be 2D (10000, n_windows). Got shape {W_img.shape}.")
+    if W_img.shape[0] != ROI_mask.size:
+        raise ValueError(f"W_img first dim {W_img.shape[0]} != ROI_mask size {ROI_mask.size}.")
+    if not (0 < frac < 1):
+        raise ValueError("frac must be in (0, 1).")
+
+    n_pix, n_win = W_img.shape
+    pos_mask_mat = np.zeros((n_pix, n_win), dtype=bool)
+    neg_mask_mat = np.zeros((n_pix, n_win), dtype=bool)
+    pos_thresh = np.full(n_win, np.nan, dtype=float)
+    neg_thresh = np.full(n_win, np.nan, dtype=float)
+
+    roi_idx = np.flatnonzero(ROI_mask)
+
+    for j in range(n_win):
+        w = W_img[:, j]
+        w_roi = w[roi_idx]
+
+        # ignore NaNs if present
+        valid = np.isfinite(w_roi)
+        if not np.any(valid):
+            continue
+        w_roi = w_roi[valid]
+        roi_idx_valid = roi_idx[valid]
+
+        if strict_sign:
+            pos_vals = w_roi[w_roi > 0]
+            neg_vals = w_roi[w_roi < 0]
+
+            if pos_vals.size > 0:
+                tpos = np.percentile(pos_vals, 100 * (1 - frac))
+                pos_thresh[j] = tpos
+                pos_mask_mat[roi_idx_valid, j] = (w_roi >= tpos) & (w_roi > 0)
+
+            if neg_vals.size > 0:
+                tneg = np.percentile(neg_vals, 100 * frac)
+                neg_thresh[j] = tneg
+                neg_mask_mat[roi_idx_valid, j] = (w_roi <= tneg) & (w_roi < 0)
+
+        else:
+            # Less strict: compute thresholds over all ROI weights
+            tpos = np.percentile(w_roi, 100 * (1 - frac))
+            tneg = np.percentile(w_roi, 100 * frac)
+            pos_thresh[j] = tpos
+            neg_thresh[j] = tneg
+            pos_mask_mat[roi_idx_valid, j] = (w_roi >= tpos)
+            neg_mask_mat[roi_idx_valid, j] = (w_roi <= tneg)
+
+    return pos_mask_mat, neg_mask_mat

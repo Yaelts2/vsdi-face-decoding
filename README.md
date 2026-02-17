@@ -99,7 +99,7 @@ Current flow in `scripts/main.py`:
 
 Depending on what you run, outputs include:
 - normalized `.npy` condition files under `data/processed/`
-- ROI mask file (`ROI_onlyV24_mask.npy`)
+- ROI mask file (`ROI_mask.npy`)
 - diagnostic figures (accuracy bars, confusion matrix, ROC, spatial weights, permutation/activation plots)
 - interactive movie of windowed weight maps
 

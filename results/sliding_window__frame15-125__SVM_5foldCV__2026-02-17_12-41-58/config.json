@@ -1,0 +1,18 @@
+{
+  "experiment": "sliding_window",
+  "tag": "frame15-125__SVM_5foldCV",
+  "n_trials_per_class": 28,
+  "face_file": "condsXn1_110209a.npy",
+  "nonface_file": "condsXn5_110209a.npy",
+  "data_dir": "data/processed/condsXn/",
+  "zscore_baseline_frames": [
+    1,
+    24
+  ],
+  "model": "linear SVM",
+  "window_size": 5,
+  "start_frame": 15,
+  "stop_frame": 125,
+  "step": 1,
+  "n_splits": 5
+}
