@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import accuracy_score
 from scripts.functions_scripts import feature_extraction as fe
+from scripts.functions_scripts import sliding_win as sw
 
 import numpy as np
 
@@ -255,6 +256,7 @@ def plot_permutation_test_trial(perm_data, bins=30, figsize=(7, 4), title=None):
 
 ######### sliding window
 
+
 def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, trials)
                                     y_trials,              # (trials,)
                                     make_estimator,        # callable -> fresh estimator each fold
@@ -265,255 +267,162 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
                                     n_splits=5,
                                     n_perm=100,
                                     seed=0,
-                                    return_null=False):
+                                    return_null=False,
+                                    return_perm_stats=False,  # if True, store per-perm mean curves (frame/trial) from the real analysis
+                                    ):
     """
-    sliding-window permutation test.
+    Sliding-window permutation test that reuses the REAL decoding pipeline:
+        sliding_window_decode_with_stats()
 
     For each permutation:
-        - Shuffle trial labels ONCE
-        - Run full sliding-window decoding
-        - Store entire accuracy curve
+        - Shuffle trial labels ONCE (y_trials)
+        - Run sliding_window_decode_with_stats on the permuted labels
+        - Store the resulting accuracy curves over windows
 
     Returns:
-        - null mean ± SEM across permutations (per window)
+        - null mean ± SEM across permutations (per window) for:
+            * frame_acc_mean curve
+            * trial_acc_mean curve
+        - centers (window centers)
         - optionally full null curves (n_perm, n_windows)
     """
-
     X = np.asarray(X_pix_frames_trials)
     y_trials = np.asarray(y_trials).astype(int)
-
+    if X.ndim != 3:
+        raise ValueError(f"X must be 3D (pixels, frames, trials); got shape {X.shape}")
     n_pixels, n_frames, n_trials = X.shape
     if y_trials.shape[0] != n_trials:
         raise ValueError(f"y_trials has {y_trials.shape[0]} but X has {n_trials} trials")
 
+    # Compute centers once to ensure consistency across permutations
     stop_frame = min(int(stop_frame), n_frames)
     last_start = min(n_frames - window_size, stop_frame - window_size)
     if last_start < start_frame:
-        raise ValueError("stop_frame too early for window_size")
+        raise ValueError("stop_frame is too early for the given start_frame/window_size")
+    centers = np.asarray([s + window_size // 2 for s in range(start_frame, last_start + 1, step)])
+    n_windows = centers.size
 
     rng = np.random.default_rng(seed)
-    gkf = GroupKFold(n_splits=n_splits)
 
-    # Precompute window centers
-    centers = []
-    window_starts = []
-    for start in range(start_frame, last_start + 1, step):
-        centers.append(start + window_size // 2)
-        window_starts.append(start)
+    null_frame_curves = np.zeros((n_perm, n_windows), dtype=float)
+    null_trial_curves = np.zeros((n_perm, n_windows), dtype=float)
 
-    centers = np.asarray(centers)
-    n_windows = len(window_starts)
+    # Optional: store the full per-perm dict outputs (lightweight stats only)
+    perm_stats = [] if return_perm_stats else None
 
-    # Storage for full null curves
-    null_frame_curves = np.zeros((n_perm, n_windows)) # (n_perm, n_windows)
-    null_trial_curves = np.zeros((n_perm, n_windows)) # (n_perm, n_windows) # stores trial-level accuracy across windows for each permutation
-
-    #               PERMUTATION LOOP
     for p in range(n_perm):
-        # Shuffle trial labels ONCE
-        y_perm_trials = rng.permutation(y_trials)
+        y_perm = rng.permutation(y_trials)
+        perm_out = sw.sliding_window_decode_with_stats(X_pix_frames_trials=X,
+                                                    y_trials=y_perm,
+                                                    make_estimator=make_estimator,
+                                                    window_size=window_size,
+                                                    start_frame=start_frame,
+                                                    stop_frame=stop_frame,
+                                                    step=step,
+                                                    n_splits=n_splits)
 
-        frame_curve = [] # store frame-level accuracy for this permutation across windows
-        trial_curve = [] # store trial-level accuracy for this permutation across windows
+        # Safety: ensure window geometry matches
+        if perm_out["centers"].shape[0] != n_windows or not np.all(perm_out["centers"] == centers):
+            raise RuntimeError("Permutation decode returned different centers than expected. "
+                            "Check window parameters consistency.")
 
-        #Full sliding window for this permutation
-        for w, start in enumerate(window_starts):
+        # Store the null curves: use the *means across folds* per window (exactly what you plot as the curve)
+        null_frame_curves[p, :] = np.asarray(perm_out["frame_acc_mean"], dtype=float)
+        null_trial_curves[p, :] = np.asarray(perm_out["trial_acc_mean"], dtype=float)
 
-            end = start + window_size
+        if return_perm_stats:
+            perm_stats.append({"frame_acc_mean": perm_out["frame_acc_mean"],
+                            "frame_acc_sem":  perm_out["frame_acc_sem"],
+                            "trial_acc_mean": perm_out["trial_acc_mean"],
+                            "trial_acc_sem":  perm_out["trial_acc_sem"]})
 
-            X_win = X[:, start:end, :]
-            X_frames, y_perm_frames, groups = fe.frames_as_samples(X_win,y_perm_trials,
-                                                                trial_axis=2,
-                                                                frame_axis=1,
-                                                                pixel_axis=0)
-
-            fold_acc_f = [] # store frame-level accuracy for each fold in this window
-            fold_acc_t = [] # store trial-level accuracy for each fold in this window
-
-            for tr_idx, te_idx in gkf.split(X_frames, y_perm_frames, groups):
-                clf = make_estimator()
-                clf.fit(X_frames[tr_idx], y_perm_frames[tr_idx])
-                y_pred = clf.predict(X_frames[te_idx])
-
-                # Frame-level
-                acc_f = accuracy_score(y_perm_frames[te_idx], y_pred)
-                fold_acc_f.append(float(acc_f))
-
-                # Trial-level
-                y_true_trial, y_pred_trial = cv.majority_vote_trial_predictions(y_pred,
-                                                                                y_perm_frames[te_idx],
-                                                                                groups[te_idx])
-                acc_t = accuracy_score(y_true_trial, y_pred_trial)
-                fold_acc_t.append(float(acc_t))
-
-            frame_curve.append(np.mean(fold_acc_f))
-            trial_curve.append(np.mean(fold_acc_t))
-
-        null_frame_curves[p, :] = frame_curve
-        null_trial_curves[p, :] = trial_curve
-
-    #                SUMMARY STATISTICS
-    null_frame_mean = np.mean(null_frame_curves, axis=0) # (n_windows,)
-    null_frame_sem  = sr._sem(null_frame_curves)  # assumes your SEM works row-wise # (n_windows,)
-    null_trial_mean = np.mean(null_trial_curves, axis=0) # (n_windows,)
-    null_trial_sem  = sr._sem(null_trial_curves) # (n_windows,)
+    # Summary across permutations (per window)
+    null_frame_mean = np.mean(null_frame_curves, axis=0)
+    null_frame_sem  = sr._sem(null_frame_curves, axis=0)  # expects axis support
+    null_trial_mean = np.mean(null_trial_curves, axis=0)
+    null_trial_sem  = sr._sem(null_trial_curves, axis=0)
 
     out = {"centers": centers,
         "null_frame_acc_mean": null_frame_mean,
         "null_frame_acc_sem":  null_frame_sem,
         "null_trial_acc_mean": null_trial_mean,
         "null_trial_acc_sem":  null_trial_sem,
-        "params": {"window_size": window_size,
-                "start_frame": start_frame,
-                "stop_frame": stop_frame,
-                "step": step,
-                "n_splits": n_splits,
-                "n_perm": n_perm,
-                "seed": seed,}}
+        "params": {"window_size": int(window_size),
+                "start_frame": int(start_frame),
+                "stop_frame": int(stop_frame),
+                "step": int(step),
+                "n_splits": int(n_splits),
+                "n_perm": int(n_perm),
+                "seed": int(seed)}
+    }
 
     if return_null:
-        out["null_frame_acc"] = null_frame_curves      # (n_perm, n_windows)
-        out["null_trial_acc"] = null_trial_curves      # (n_perm, n_windows)
+        out["null_frame_acc"] = null_frame_curves  # (n_perm, n_windows)
+        out["null_trial_acc"] = null_trial_curves  # (n_perm, n_windows)
+
+    if return_perm_stats:
+        out["perm_stats"] = perm_stats  # list length n_perm
+
     return out
+
+
+
 
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-def plot_slidingwindow_perm_results(centers,real_curve,null_trial_acc=None,
-                                    null_mean=None,
-                                    null_sem=None,
-                                    chance=0.5,
-                                    alpha=0.05,
-                                    two_sided=False,
-                                    show_pvalues=True,
-                                    show_peak_hist=True,
-                                    figsize_curve=(8, 4),
-                                    figsize_p=(8, 2.8),
-                                    figsize_hist=(6, 3.5)):
+def plot_sliding_window_permutation_trial_level(perm_data,
+                                                chance=0.5,
+                                                title="Sliding-window permutation test (trial-level)",
+                                                figsize=(7, 4),
+                                                ylim=(0.4, 1.0),
+                                                show_null_curves=False,
+                                                null_alpha=0.08):
     """
-    Plot sliding-window permutation-test results.
+    Plot trial-level real curve vs permutation null (mean ± SEM) using *saved* values only.
 
-    Panels (controlled by flags):
-    1) Accuracy vs time: real curve + null mean ± SEM (or computed from null_trial_acc).
-    2) Empirical p-value vs time (optional).
-    3) Null histogram at peak time (optional).
-
-    Parameters
-    centers : array, shape (n_windows,)
-        Window centers (typically frame indices; can be ms if you already converted).
-    real_curve : array, shape (n_windows,)
-        Real (unshuffled) trial-accuracy per window.
-    null_trial_acc : array, shape (n_perm, n_windows), optional
-        Full null curves. If provided, p-values + null mean/sem can be computed from it.
-    null_mean, null_sem : arrays, shape (n_windows,), optional
-        Precomputed null mean/SEM. Used if null_trial_acc not provided.
-    chance : float
-        Chance level (0.5 for binary classification).
-    alpha : float
-        Significance threshold to display on p-value panel.
-    two_sided : bool
-        If True, compute two-sided empirical p-values (based on |null - mean_null| >= |real - mean_null|).
-        Otherwise one-sided: P(null >= real).
-    show_pvalues : bool
-        Whether to draw the p-value panel (requires null_trial_acc).
-    show_peak_hist : bool
-        Whether to draw histogram of null accuracies at peak real accuracy (requires null_trial_acc).
-
-    Returns
-    out : dict
-        Computed arrays:
-        - centers, real_curve
-        - null_mean, null_sem
-        - pvals (if computed)
-        - peak_idx (if histogram computed)
+    perm_data: dict returned by load_sliding_window_permutation()
     """
-    centers = np.asarray(centers).ravel()
-    real_curve = np.asarray(real_curve, dtype=float).ravel()
+    centers = np.asarray(perm_data["centers"])
+    real = perm_data["real_trial_curve"]
+    null_mean = perm_data["null_trial_mean"]
+    null_sem = perm_data["null_trial_sem"]
 
-    if centers.size != real_curve.size:
-        raise ValueError(f"centers and real_curve must match, got {centers.size} vs {real_curve.size}")
+    if real is None:
+        raise ValueError("perm_data['real_trial_curve'] is missing in the saved npz.")
+    if null_mean is None or null_sem is None:
+        raise ValueError("perm_data must include 'null_trial_mean' and 'null_trial_sem' (saved).")
 
-    # derive null mean/sem
-    pvals = None
-    if null_trial_acc is not None:
-        null_trial_acc = np.asarray(null_trial_acc, dtype=float)
-        if null_trial_acc.ndim != 2 or null_trial_acc.shape[1] != centers.size:
-            raise ValueError(
-                f"null_trial_acc must be (n_perm, n_windows={centers.size}), got {null_trial_acc.shape}"
-            )
-        mean_null = np.nanmean(null_trial_acc, axis=0)
-        sem_null = np.nanstd(null_trial_acc, axis=0, ddof=1) / np.sqrt(null_trial_acc.shape[0])
+    real = np.asarray(real, dtype=float)
+    null_mean = np.asarray(null_mean, dtype=float)
+    null_sem = np.asarray(null_sem, dtype=float)
 
-        # empirical p-values (with +1 smoothing)
-        n_perm = null_trial_acc.shape[0]
-        if two_sided:
-            dev_real = np.abs(real_curve - mean_null)
-            dev_null = np.abs(null_trial_acc - mean_null[None, :])
-            pvals = (np.sum(dev_null >= dev_real[None, :], axis=0) + 1) / (n_perm + 1)
-        else:
-            pvals = (np.sum(null_trial_acc >= real_curve[None, :], axis=0) + 1) / (n_perm + 1)
-    else:
-        if null_mean is None or null_sem is None:
-            raise ValueError("Provide either null_trial_acc OR (null_mean and null_sem).")
-        mean_null = np.asarray(null_mean, dtype=float).ravel()
-        sem_null = np.asarray(null_sem, dtype=float).ravel()
-        if mean_null.size != centers.size or sem_null.size != centers.size:
-            raise ValueError("null_mean/null_sem must match centers length.")
+    plt.figure(figsize=figsize)
 
-    # Panel 1: accuracy curves
-    plt.figure(figsize=figsize_curve)
-    plt.plot(centers, real_curve, linewidth=2, label="Real accuracy")
-    plt.plot(centers, mean_null, linestyle="--", linewidth=1.5, label="Null mean")
-    plt.fill_between(centers, mean_null - sem_null, mean_null + sem_null, alpha=0.25, label="Null ± SEM")
-    plt.axhline(chance, linestyle=":", linewidth=1.5, label=f"Chance={chance:.2f}")
+    # Optional: plot all null curves (already saved) faintly
+    if show_null_curves and (perm_data.get("null_trial_acc") is not None):
+        null_curves = np.asarray(perm_data["null_trial_acc"], dtype=float)  # (n_perm, n_windows)
+        for i in range(null_curves.shape[0]):
+            plt.plot(centers, null_curves[i], alpha=null_alpha, linewidth=1)
 
-    # optional significance shading (only if pvals computed)
-    if pvals is not None:
-        sig = pvals < alpha
-        if np.any(sig):
-            y0, y1 = plt.ylim()
-            plt.fill_between(centers, y0, y1, where=sig, alpha=0.10, step=None, label=f"p < {alpha:g}")
+    # Null mean ± SEM (saved)
+    plt.plot(centers, null_mean, linewidth=2, label="Null mean (permutations)")
+    plt.fill_between(centers, null_mean - null_sem, null_mean + null_sem, alpha=0.25, label="Null ± SEM")
 
-    plt.xlabel("Window center (frame or ms)")
+    # Real curve (saved)
+    plt.plot(centers, real, linewidth=2, label="Real (trial-level)")
+
+    # Chance line
+    if chance is not None:
+        plt.axhline(float(chance), linestyle="--", linewidth=1, label=f"Chance={chance}")
+
+    plt.title(title)
+    plt.xlabel("Frame (window center)")
     plt.ylabel("Accuracy")
-    plt.title("Sliding-window permutation test")
-    plt.legend(frameon=False)
+    if ylim is not None:
+        plt.ylim(*ylim)
+    plt.legend()
     plt.tight_layout()
-
-    # Panel 2: p-values
-    if show_pvalues and (pvals is not None):
-        plt.figure(figsize=figsize_p)
-        plt.plot(centers, pvals, linewidth=1.8)
-        plt.axhline(alpha, linestyle="--", linewidth=1.5)
-        plt.ylim(0, 1.0)
-        plt.xlabel("Window center (frame or ms)")
-        plt.ylabel("Empirical p-value")
-        plt.title("Permutation p-values across time")
-        plt.tight_layout()
-
-    # Panel 3: histogram at peak
-    peak_idx = None
-    if show_peak_hist and (null_trial_acc is not None):
-        peak_idx = int(np.nanargmax(real_curve))
-        null_at_peak = null_trial_acc[:, peak_idx]
-
-        plt.figure(figsize=figsize_hist)
-        plt.hist(null_at_peak, bins=20, alpha=0.8)
-        plt.axvline(real_curve[peak_idx], linewidth=2, label="Real (peak)")
-        plt.axvline(np.nanmean(null_at_peak), linestyle="--", linewidth=1.5, label="Null mean")
-        plt.xlabel("Accuracy")
-        plt.ylabel("Count")
-        plt.title(f"Null distribution at peak (center={centers[peak_idx]})")
-        plt.legend(frameon=False)
-        plt.tight_layout()
-
-    return {
-        "centers": centers,
-        "real_curve": real_curve,
-        "null_mean": mean_null,
-        "null_sem": sem_null,
-        "pvals": pvals,
-        "peak_idx": peak_idx,
-    }
+    plt.show()
