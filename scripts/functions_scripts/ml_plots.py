@@ -1,8 +1,16 @@
-from __future__ import annotations
+from pathlib import Path
+import sys
+
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+print("Project root:", project_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, roc_curve, auc
-from .preprocessing_functions import green_gray_magenta
+from scripts.functions_scripts.preprocessing_functions import green_gray_magenta
 ourCmap = green_gray_magenta()
 
 
@@ -167,15 +175,62 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 
 
 
+
+def avg_consecutive_frames_with_ms_labels(X, frame_ids, avg_n=2, dt_ms=10, zero_frame=27):
+    """
+    Non-overlapping average of consecutive frames and ms labels.
+
+    X:        (pixels, n_frames)
+    frame_ids:(n_frames,) e.g. 25..80
+    avg_n:    number of consecutive frames per bin (1..4...)
+    dt_ms:    ms per original frame (10 ms)
+    zero_frame: frame number that should map to 0 ms (27)
+
+    Returns
+    -------
+    X_avg:      (pixels, n_bins)
+    labels_ms:  (n_bins,) ms labels for each bin (using FIRST frame in each bin)
+    bin_frames: (n_bins,) frame number used for each bin label
+    """
+    X = np.asarray(X)
+    frame_ids = np.asarray(frame_ids)
+
+    if X.ndim != 2:
+        raise ValueError("X must be 2D: (pixels, frames)")
+    if frame_ids.ndim != 1 or frame_ids.size != X.shape[1]:
+        raise ValueError("frame_ids must be 1D with length equal to X.shape[1]")
+    if not (isinstance(avg_n, int) and avg_n >= 1):
+        raise ValueError("avg_n must be an integer >= 1")
+
+    if avg_n == 1:
+        labels_ms = (frame_ids - zero_frame) * dt_ms
+        return X.copy(), labels_ms, frame_ids.copy()
+
+    n_frames = X.shape[1]
+    usable = (n_frames // avg_n) * avg_n  # drop remainder to keep full bins
+
+    X_use = X[:, :usable]
+    f_use = frame_ids[:usable]
+
+    # (pixels, n_bins, avg_n) -> mean over avg_n
+    X_avg = X_use.reshape(X.shape[0], -1, avg_n).mean(axis=2)
+
+    # Label each bin by the FIRST frame number in that bin (25, 27, 29, ...)
+    bin_frames = f_use.reshape(-1, avg_n)[:, 0]
+    labels_ms = (bin_frames - zero_frame) * dt_ms
+
+    return X_avg, labels_ms, bin_frames
+
+
 def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
-    # if looking in raw data (not Zscored), data needs to substract 1  (-1)
+    # Ensure 2D input
     if x.ndim == 1:
         x = x.reshape(-1, 1)
     m, n = x.shape
     if width <= 0:
         width = int(np.ceil(np.sqrt(n)))
     height = int(np.ceil(n / width))
-    # Handle Clipping
+    #Clipping
     if isinstance(low, str) and low.lower() == 'auto':
         v_mins, v_maxs = [None] * n, [None] * n
     elif isinstance(low, str) and low.lower() == 'all':
@@ -183,36 +238,43 @@ def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
     else:
         v_mins = np.full(n, low) if np.isscalar(low) else low
         v_maxs = np.full(n, high) if np.isscalar(high) else high
-    fig, axes = plt.subplots(height, width, figsize=(width*3, height*3), squeeze=False)
+    fig, axes = plt.subplots(height, width,
+                            figsize=(width * 8, height * 8),
+                            squeeze=False)
     axes_flat = axes.flatten()
     for i in range(n):
         ax = axes_flat[i]
-        # 1. Reshape using 'C' order because your data is "ordered by rows"
-        # 2. We reshape as (xsize, ysize) or (ysize, xsize) depending on the source
         img_data = x[:, i].reshape((ysize, xsize), order='C')
-        # Use 'jet' or 'nipy_spectral' 
-        im = ax.imshow(img_data, cmap=ourCmap, vmin=v_mins[i], vmax=v_maxs[i], origin='upper')
+        im = ax.imshow(img_data,
+                    cmap='jet',
+                    vmin=v_mins[i],
+                    vmax=v_maxs[i],
+                    origin='upper')
         ax.axis('off')
-        # Add frame numbers if provided
+        #Title 
         if frames is not None:
-            ax.set_title(f"frame {frames[i]}", fontsize=6)
-    # Hide extra subplots
-    for j in range(i + 1, len(axes_flat)):
+            ax.set_title(f"{frames[i]} ms",
+                        fontsize=8, fontweight='bold',
+                        pad=2,      # distance from image
+                        y=0.98      # relative vertical position (0–1 inside axes)
+                        )
+    # Hide unused axes
+    for j in range(n, len(axes_flat)):
         axes_flat[j].axis('off')
-    plt.tight_layout()
-    return fig,axes_flat
+    # Better spacing control than tight_layout alone
+    plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, wspace=0.08, hspace=0.1)
+    return fig, axes_flat
 
 #example usage
 '''
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_270109b.npy")
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_110209a.npy")
 x_avg = x.mean(axis=2)
-x_avg_frames =  x_avg[:, 25:120]
-fig,axes_flat =mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=range(25,120))
-plt.show()
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_270109b.npy")
-x_avg = x.mean(axis=2)
-x_avg_frames =  x_avg[:, 25:120]
-fig,axes_flat =mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=range(25,120))
+x_avg_frames =  x_avg[:, 25:81]
+frame_ids = np.arange(25, 81)          # 25..80 (56 frames)
+X_avg, labels_ms, bin_frames = avg_consecutive_frames_with_ms_labels(
+    X=x_avg_frames, frame_ids=frame_ids, avg_n=2, dt_ms=10, zero_frame=27
+)
+fig,axes_flat =mimg(X_avg-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=labels_ms.astype(int), width=14)
 plt.show()
 '''
 
@@ -355,8 +417,8 @@ def plot_frame_vs_trial_bars(results, chance= 0.5, title: str = "Frame vs Trial 
     sem_t = float(np.nanstd(acc_trial, ddof=1) / np.sqrt(k)) if k > 1 else np.nan
 
     plt.figure(figsize=figsize)
-    plt.bar(x - width/2, acc_frame, width=width, alpha=0.85, label="Frame acc")
-    plt.bar(x + width/2, acc_trial, width=width, alpha=0.85, label="Trial acc (vote)")
+    plt.bar(x - width/2, acc_frame, width=width, alpha=0.85, label="Frame acc",color='cornflowerblue')
+    plt.bar(x + width/2, acc_trial, width=width, alpha=0.85, label="Trial acc (vote)",color='mediumblue')
     plt.axhline(chance, linestyle="--", linewidth=2, label="Chance")
 
     # Optional mean ± SEM markers (placed to the right)
@@ -364,23 +426,23 @@ def plot_frame_vs_trial_bars(results, chance= 0.5, title: str = "Frame vs Trial 
         mean_x = k + 0.6
         # Frame mean
         if np.isfinite(sem_f):
-            plt.errorbar(mean_x - 0.12, mean_f, yerr=sem_f, fmt="o", capsize=6, linewidth=2)
+            plt.errorbar(mean_x - 0.12, mean_f, yerr=sem_f, fmt="o", capsize=6, linewidth=2, color='cornflowerblue')
             plt.text(mean_x - 0.12, mean_f + 0.02, f"{mean_f:.2f}±{sem_f:.2f}",
-                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+                    ha="center", va="top", fontsize=13, fontweight="bold", color='cornflowerblue')
         else:
             plt.plot([mean_x - 0.12], [mean_f], "o")
             plt.text(mean_x - 0.12, mean_f + 0.02, f"{mean_f:.2f}",
-                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+                    ha="center", va="top", fontsize=11, fontweight="bold")
 
         # Trial mean
         if np.isfinite(sem_t):
-            plt.errorbar(mean_x + 0.12, mean_t, yerr=sem_t, fmt="o", capsize=6, linewidth=2)
+            plt.errorbar(mean_x + 0.12, mean_t, yerr=sem_t, fmt="o", capsize=6, linewidth=2, color='mediumblue')
             plt.text(mean_x + 0.12, mean_t + 0.02, f"{mean_t:.2f}±{sem_t:.2f}",
-                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+                    ha="center", va="top", fontsize=13, fontweight="bold", color='mediumblue')
         else:
             plt.plot([mean_x + 0.12], [mean_t], "o")
             plt.text(mean_x + 0.12, mean_t + 0.02, f"{mean_t:.2f}",
-                    ha="center", va="bottom", fontsize=11, fontweight="bold")
+                    ha="center", va="top", fontsize=11, fontweight="bold")
 
         # Extend x-axis ticks to include "Mean"
         plt.xticks(
@@ -396,7 +458,8 @@ def plot_frame_vs_trial_bars(results, chance= 0.5, title: str = "Frame vs Trial 
     plt.title(title, fontsize=16, fontweight="bold")
     if ylim is not None:
         plt.ylim(ylim[0], ylim[1])
-
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
     plt.legend(fontsize=11, frameon=False)
     plt.tight_layout()
     plt.show()
@@ -488,7 +551,7 @@ def plot_confusion_matrix(
     cm = np.divide(cm_counts, np.maximum(row_sums, 1), dtype=float)
 
     plt.figure(figsize=figsize)
-    im = plt.imshow(cm, vmin=0, vmax=1)
+    im = plt.imshow(cm, vmin=0, vmax=1, cmap='Blues')
     cbar = plt.colorbar(im)
     cbar.ax.tick_params(labelsize=11)
     cbar.set_label("Proportion", fontsize=12)

@@ -171,7 +171,7 @@ def compute_weight_stats_across_folds(W_outer, eps= 1e-12) -> dict:
 
 def plot_weight_stat_maps(W_outer,roi_mask_flat, pixels= 100,cmap_mean= ourCmap,
                         cmap_std= "bwr", cmap_abs= ourCmap, cmap_sign= ourCmap,cmap_mean_norm= ourCmap,
-                        clip_mean= (-0.0002, 0.0002),
+                        clip_mean= (-0.002, 0.002),
                         clip_std= "sym",
                         clip_abs= (0, 0.0002),
                         clip_sign= (-1, 1),
@@ -188,11 +188,11 @@ def plot_weight_stat_maps(W_outer,roi_mask_flat, pixels= 100,cmap_mean= ourCmap,
     """
     stats = compute_weight_stats_across_folds(W_outer, eps=eps)
 
-    items = [("mean",      stats["mean"],      cmap_mean, clip_mean),
-            ("std",       stats["std"],       cmap_std,  clip_std),
-            ("abs(mean)", stats["abs_mean"],  cmap_abs,  clip_abs),
-            ("sign(mean)",stats["sign_mean"], cmap_sign, clip_sign),
-            ("mean_norm", stats["mean_norm"], cmap_mean_norm, clip_mean_norm)    ]
+    items = [("mean",      stats["mean"],      cmap_mean, clip_mean)]
+            #("std",       stats["std"],       cmap_std,  clip_std),
+            #("abs(mean)", stats["abs_mean"],  cmap_abs,  clip_abs),
+            #("sign(mean)",stats["sign_mean"], cmap_sign, clip_sign),
+            #("mean_norm", stats["mean_norm"], cmap_mean_norm, clip_mean_norm)   ] 
 
     fig, axes = plt.subplots(1, 5, figsize=figsize, squeeze=False)
     axes = axes[0]

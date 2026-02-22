@@ -4,15 +4,9 @@ from sklearn.model_selection import GroupKFold
 from sklearn.metrics import accuracy_score
 from functions_scripts import feature_extraction as fe
 from functions_scripts import ml_cv as cv
-from functions_scripts import ml_evaluation as ev
 
 
-def _sem(x) -> float:
-    x = np.asarray(x, dtype=float)
-    x = x[~np.isnan(x)]
-    if x.size <= 1:
-        return np.nan
-    return float(np.std(x, ddof=1) / np.sqrt(x.size))
+
 
 
 def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, trials)  e.g. (8518, 256, 56)
@@ -110,7 +104,7 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
         "centers": np.asarray(centers),
         "frame_acc_mean": np.asarray(frame_acc_mean),
         "frame_acc_sem":  np.asarray(frame_acc_sem),
-        "trial_acc_mean": np.asarray(trial_acc_mean),
+        "trial_acc_mean": np.asarray(trial_acc_mean), # (n_windows,)
         "trial_acc_sem":  np.asarray(trial_acc_sem),
         "w_mean_windows": np.vstack(w_mean_windows),  # (n_windows, n_features)
         "w_sem_windows":  np.vstack(w_sem_windows),   # (n_windows, n_features) diagnostic
@@ -185,5 +179,8 @@ def plot_sliding_window_accuracy_with_sem(res: dict,
     plt.legend()
     plt.tight_layout()
     plt.show()
+
+
+
 
 

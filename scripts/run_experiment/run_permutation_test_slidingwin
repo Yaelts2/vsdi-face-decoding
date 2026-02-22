@@ -1,0 +1,137 @@
+# run_permutation_test_sliding_window.py
+#
+# Runs a permutation test for an ALREADY-SAVED sliding-window run folder.
+# Rebuilds only the dataset features needed for permutation (X_roi + y_trials).
+
+from pathlib import Path
+from datetime import datetime
+import json
+import numpy as np
+
+from scripts.functions_scripts import preprocessing_functions as pre
+from scripts.functions_scripts import ml_cv as cv
+from scripts.functions_scripts import model_control as mc
+from scripts.functions_scripts import save_results as sr
+
+
+# USER SETTINGS
+RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
+
+# Point to the specific sliding-window run folder you want to test
+RUN_DIR = RESULTS_ROOT / "sliding_window__frame15-125__SVM_5foldCV__2026-02-17_12-41-58"  # <- REPLACE
+
+N_PERMUTATIONS = 5
+PERM_SEED = 42
+
+# Save destination root:
+PERM_ROOT = RESULTS_ROOT / "permutation_test_sliding_window"
+
+
+# 1) Load saved run (config + real results + ROI path)
+config, real_results, ROI_mask_path = sr.load_experiment(RUN_DIR)
+
+print("Loaded run:")
+print("  RUN_DIR:", RUN_DIR)
+print("  experiment:", config.get("experiment"))
+print("  tag:", config.get("tag"))
+print("  window_size:", config.get("window_size"))
+print("  start_frame:", config.get("start_frame"))
+print("  stop_frame:", config.get("stop_frame"))
+print("  step:", config.get("step"))
+print("  n_splits:", config.get("n_splits"))
+print("  metric:", config.get("metric", "acc"))
+print()
+
+
+# 2) Pull params from config (must match training)
+face_file = config["face_file"]
+nonface_file = config["nonface_file"]
+data_dir = config["data_dir"]
+
+baseline = tuple(config["zscore_baseline_frames"])
+
+# sliding-window params
+window_size = int(config.get("window_size", 5))
+start_frame = int(config.get("start_frame", 15))
+stop_frame = int(config.get("stop_frame", 125))
+step = int(config.get("step", 1))
+n_splits = int(config.get("n_splits", 5))
+
+
+make_estimator = lambda: cv.make_linear_svm(C=0.0001)
+
+
+# 3) Rebuild dataset (X_trials, y_trials) + same preprocessing + ROI
+X_trials, y_trials, _dataset_info2 = pre.build_X_y(face_file=face_file, nonface_file=nonface_file,
+                                                data_dir=data_dir)
+
+X_z, _mean, _std = pre.zscore_dataset_pixelwise_trials(X_trials,baseline_frames=baseline)
+
+ROI_mask = np.load(ROI_mask_path)  # (pixels,)
+ROI_mask = np.asarray(ROI_mask, dtype=bool)
+
+# Apply ROI to get (roi_pixels, frames, trials)
+X_roi = X_z[ROI_mask, :, :]
+
+print("Rebuilt data:")
+print("  X_trials:", X_trials.shape)
+print("  X_roi:", X_roi.shape)
+print("  y_trials:", y_trials.shape)
+print()
+
+
+# 4) Run permutation test (now uses sliding_window_decode_with_stats internally)
+perm_result = mc.sliding_window_permutation_test(X_pix_frames_trials=X_roi, y_trials=y_trials,
+                                                make_estimator=make_estimator,
+                                                window_size=window_size,
+                                                start_frame=start_frame,
+                                                stop_frame=stop_frame,
+                                                step=step,
+                                                n_splits=n_splits,
+                                                n_perm=N_PERMUTATIONS,
+                                                seed=PERM_SEED,
+                                                return_null=True
+                                                return_perm_stats=True)          )
+
+# 5) SAVE (no significance computed)
+PERM_ROOT.mkdir(parents=True, exist_ok=True)
+ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+model_name = RUN_DIR.name
+save_dir = PERM_ROOT / f"slidingwindow__perm{N_PERMUTATIONS}__seed{PERM_SEED}__{ts}"
+save_dir.mkdir(parents=True, exist_ok=False)
+
+perm_config = {"source_run_dir": str(RUN_DIR),
+            "source_model_name": model_name,
+            "n_permutations": int(N_PERMUTATIONS),
+            "perm_seed": int(PERM_SEED),
+            # preprocessing + SW params
+            "baseline_frames": list(baseline),
+            "window_size": int(window_size),
+            "start_frame": int(start_frame),
+            "stop_frame": int(stop_frame),
+            "step": int(step),
+            "n_splits": int(n_splits),
+            # model identity (keep whatever you store)
+            "estimator": config.get("model", None)}
+
+with open(save_dir / "config.json", "w", encoding="utf-8") as f:
+    json.dump(perm_config, f, indent=2)
+
+
+np.savez_compressed(save_dir / "perm_result.npz",
+                    centers=np.asarray(perm_result["centers"], dtype=int),
+                    # Real curves from original run (if they exist)
+                    real_trial_curve=np.asarray(real_results.get("trial_acc_mean", np.nan), dtype=float),
+                    real_frame_curve=np.asarray(real_results.get("frame_acc_mean", np.nan), dtype=float),
+                    # Full null curves
+                    null_trial_acc=np.asarray(perm_result["null_trial_acc"], dtype=float),   # (n_perm, n_windows)
+                    null_frame_acc=np.asarray(perm_result["null_frame_acc"], dtype=float),   # (n_perm, n_windows)
+                    # Null mean ± SEM
+                    null_trial_mean=np.asarray(perm_result["null_trial_acc_mean"], dtype=float),
+                    null_trial_sem=np.asarray(perm_result["null_trial_acc_sem"], dtype=float),
+                    null_frame_mean=np.asarray(perm_result["null_frame_acc_mean"], dtype=float),
+                    null_frame_sem=np.asarray(perm_result["null_frame_acc_sem"], dtype=float))
+
+print("Saved sliding-window permutation results to:")
+print(" ", save_dir)

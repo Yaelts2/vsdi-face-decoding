@@ -138,7 +138,7 @@ run_dir = save_experiment(results_root=results_root,
                         experiment="fixed_window",
                         experiment_tag=f"frame{window[0]}-{window[1]}__SVM_10fold",
                         results=nested,
-                        ROI_mask=ROI_mask_path,
+                        ROI_mask_path=ROI_mask_path,
                         dataset_info=dataset_info)
 
 print(f"\nResults saved to: {run_dir}")

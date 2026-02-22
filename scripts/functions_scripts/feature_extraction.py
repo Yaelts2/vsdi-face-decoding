@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
-from functions_scripts import ml_plots as pl
+from scripts.functions_scripts import ml_plots as pl
 
 
 def frames_as_samples(data_3d,y_trials, trial_axis=-1, frame_axis=1, pixel_axis=0):
@@ -34,7 +34,7 @@ def extract_window(data, start=35, end=45):
 
 
 
-def creat_ROI(map_flat, pixels=100):
+def create_ROI(map_flat, pixels=100):
     """
     map_flat : (pixels*pixels,) vector
     returns:
@@ -80,7 +80,7 @@ x_avg_frames =  x_avg[:, 55:65]
 print(x_avg_frames.shape)
 pl.mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0009, high=0.003)
 
-roi,x= fe.creat_ROI(x_avg[:, 50], pixels=100)
+roi,x= fe.create_ROI(x_avg[:, 50], pixels=100)
 '''
 
 

@@ -1,14 +1,21 @@
-# run_permutation_test.py
-
 from pathlib import Path
+import sys
+
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+print("Project root:", project_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from datetime import datetime
 import json
 import numpy as np
 from sklearn.model_selection import GroupKFold
-from functions_scripts import preprocessing_functions as pre
-from functions_scripts import feature_extraction as fe
-from functions_scripts import model_control as mc
-from functions_scripts import save_results as sr
+from scripts.functions_scripts import preprocessing_functions as pre
+from scripts.functions_scripts import feature_extraction as fe
+from scripts.functions_scripts import model_control as mc
+from scripts.functions_scripts import save_results as sr
+
 
 # ------------------------------------------------------------
 # USER: set which saved model/run to test
@@ -18,9 +25,9 @@ RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
 
 # Point to the specific run folder you want to test (the folder that contains config.json/result.npz/ROI_mask.npz)
 # Example:
-RUN_DIR = RESULTS_ROOT / "fixed_window" / "frame32-40__SVM_10fold__2026-02-16_12-03-51"
+RUN_DIR = RESULTS_ROOT / "fixed_window__frame32-40__SVM_10fold__2026-02-18_17-43-53"
 
-N_PERMUTATIONS = 100
+N_PERMUTATIONS = 2
 PERM_SEED = 42
 
 # Save destination root:
@@ -67,7 +74,7 @@ X_z, _mean, _std = pre.zscore_dataset_pixelwise_trials(X_trials, baseline_frames
 
 # Apply ROI + window
 ROI_mask = np.load(ROI_mask_path)
-X_roi = X_z[ROI_mask_path, :, :]                        # (roi_pixels, frames, trials)
+X_roi = X_z[ROI_mask, :, :]                        # (roi_pixels, frames, trials)
 X_win = fe.extract_window(X_roi, window[0], window[1])  # (roi_pixels, win_frames, trials)
 
 # Frames as samples
@@ -87,10 +94,8 @@ print("  y_frames:", y_frames.shape)
 print("  groups:", groups.shape)
 print()
 
-# 3) Run permutation test (trial-level shuffle expanded to frames)
-perm_result = mc.run_permutation_nested_cv(X_frames,y_frames=y_frames,
-                                        y_trial=y_trials,
-                                        groups=groups,
+# 3) Run permutation test (TRIAL-level shuffle expanded to frames)
+perm_result = mc.run_permutation_nested_cv(X_frames, y_trials, groups,
                                         n_permutations=N_PERMUTATIONS,
                                         outer_splitter=outer,
                                         inner_splitter=inner,
@@ -101,18 +106,19 @@ perm_result = mc.run_permutation_nested_cv(X_frames,y_frames=y_frames,
                                         random_seed=PERM_SEED,
                                         verbose=True)
 
-# 4) Compute significance vs the REAL run results you loaded
-stats = mc.permutation_significance_test(real_nested, perm_result, metric=metric, chance_level=0.5)
+# 4) Compute significance vs the REAL run results you loaded (TRIAL level)
+# NOTE: trial-level significance is defined for metric="acc"
+stats_trial = mc.permutation_significance_test(real_nested,perm_result)
 
-print("\n=== Permutation significance ===")
-print(f"Real {metric}: {stats['real_score']:.4f}")
-print(f"Shuffled mean ± std: {stats['shuffled_mean']:.4f} ± {stats['shuffled_std']:.4f}")
-print(f"Shuffled range: [{stats['shuffled_min']:.4f}, {stats['shuffled_max']:.4f}]")
-print(f"P-value (two-tailed): {stats['p_value_two_tailed']:.4f}")
-print("PASS (alpha=0.05):", stats["pass_alpha_0p05"])
+print("\n=== Permutation significance (TRIAL level) ===")
+print(f"Real trial acc: {stats_trial['real_score']:.4f}")
+print(f"Shuffled mean ± std: {stats_trial['shuffled_mean']:.4f} ± {stats_trial['shuffled_std']:.4f}")
+print(f"Shuffled range: [{stats_trial['shuffled_min']:.4f}, {stats_trial['shuffled_max']:.4f}]")
+print(f"P-value (two-tailed): {stats_trial['p_value_two_tailed']:.4f}")
+print("PASS (alpha=0.05):", stats_trial["pass_alpha_0p05"])
 print()
 
-# 5) Save permutation run outputs (everything needed later for plotting)
+# 5) Save permutation run outputs 
 PERM_ROOT.mkdir(parents=True, exist_ok=True)
 ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -125,7 +131,8 @@ perm_config = {"source_run_dir": str(RUN_DIR),
             "source_model_name": model_name,
             "n_permutations": int(N_PERMUTATIONS),
             "perm_seed": int(PERM_SEED),
-            "metric": metric,
+            "metric": "acc",
+            "level": "trial",
             "rule": rule,
             "tie_break": tie_break,
             "window": list(window),
@@ -135,21 +142,25 @@ perm_config = {"source_run_dir": str(RUN_DIR),
 with open(save_dir / "config.json", "w", encoding="utf-8") as f:
     json.dump(perm_config, f, indent=2)
 
-# Save permutation scores + stats + (optionally) real score
-np.savez_compressed(save_dir / "perm_result.npz",
-                    shuffled_scores=np.asarray(perm_result["shuffled_scores"], dtype=float),
-                    # real model summary
-                    real_score=float(stats["real_score"]),
-                    real_std=float(real_nested["outer_acc_std"]),
-                    # shuffled summary
-                    shuffled_mean=float(stats["shuffled_mean"]),
-                    shuffled_std=float(stats["shuffled_std"]),
-                    shuffled_min=float(stats["shuffled_min"]),
-                    shuffled_max=float(stats["shuffled_max"]),
-                    # significance
-                    p_value=float(stats["p_value_two_tailed"]),
-                    pass_alpha_0p05=bool(stats["pass_alpha_0p05"]))
-
+np.savez_compressed(
+    save_dir / "perm_result.npz",
+    # distributions
+    shuffled_scores_trials=np.asarray(perm_result["shuffled_scores_trials"], dtype=float),
+    shuffled_scores_frames=np.asarray(perm_result["shuffled_scores_frames"], dtype=float),
+    # real model summaries (trial + frame)
+    real_trial_acc=float(real_nested["outer_acc_trial_mean"]),
+    real_trial_std=float(real_nested["outer_acc_trial_std"]),
+    real_frame_acc=float(real_nested["outer_acc_mean"]),
+    real_frame_std=float(real_nested["outer_acc_std"]),
+    # shuffled summaries (trial)
+    shuffled_trial_mean=float(stats_trial["shuffled_mean"]),
+    shuffled_trial_std=float(stats_trial["shuffled_std"]),
+    shuffled_trial_min=float(stats_trial["shuffled_min"]),
+    shuffled_trial_max=float(stats_trial["shuffled_max"]),
+    # significance (trial)
+    p_value_trial_two_tailed=float(stats_trial["p_value_two_tailed"]),
+    pass_alpha_0p05_trial=bool(stats_trial["pass_alpha_0p05"]),
+)
 
 print("Saved permutation results to:")
 print(" ", save_dir)

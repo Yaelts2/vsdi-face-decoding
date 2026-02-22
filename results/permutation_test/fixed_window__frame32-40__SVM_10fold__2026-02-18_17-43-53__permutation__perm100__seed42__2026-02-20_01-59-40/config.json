@@ -1,0 +1,26 @@
+{
+  "source_run_dir": "C:\\project\\vsdi-face-decoding\\results\\fixed_window__frame32-40__SVM_10fold__2026-02-18_17-43-53",
+  "source_model_name": "fixed_window__frame32-40__SVM_10fold__2026-02-18_17-43-53",
+  "n_permutations": 100,
+  "perm_seed": 42,
+  "metric": "acc",
+  "rule": "one_se",
+  "tie_break": "smaller_C",
+  "window": [
+    32,
+    40
+  ],
+  "baseline_frames": [
+    1,
+    24
+  ],
+  "C_grid": [
+    0.0001,
+    0.001,
+    0.01,
+    0.1,
+    1.0,
+    10.0,
+    100.0
+  ]
+}

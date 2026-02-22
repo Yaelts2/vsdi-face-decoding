@@ -1,11 +1,23 @@
-from __future__ import annotations
-from functions_scripts import preprocessing_functions as pre
+from pathlib import Path
+import sys
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+print("Project root:", project_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+from scripts.functions_scripts import preprocessing_functions as pre
 from pathlib import Path
 from datetime import datetime
 import json
 import numpy as np
 
 
+def _sem(x) -> float:
+    x = np.asarray(x, dtype=float)
+    x = x[~np.isnan(x)]
+    if x.size <= 1:
+        return np.nan
+    return float(np.std(x, ddof=1) / np.sqrt(x.size))
 
 def save_experiment(results_root: str | Path,experiment: str, experiment_tag: str,
                         results: dict,
@@ -75,6 +87,113 @@ def load_experiment(run_dir):
 
 
 
+
+def load_permutation_run(run_dir):
+    """
+    Load a saved (single-window) permutation run for plotting.
+    """
+    run_dir = Path(run_dir)
+    config_path = run_dir / "config.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Missing config.json in {run_dir}")
+    with config_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+    perm_path = run_dir / "perm_result.npz"
+    if not perm_path.exists():
+        raise FileNotFoundError(f"Missing perm_result.npz in {run_dir}")
+    with np.load(perm_path, allow_pickle=False) as d:
+        required = ["shuffled_scores_trials",
+                    "real_trial_acc",
+                    "real_trial_std",
+                    "shuffled_trial_mean",
+                    "shuffled_trial_std",
+                    "shuffled_trial_min",
+                    "shuffled_trial_max",
+                    "p_value_trial_two_tailed",
+                    "pass_alpha_0p05_trial"]
+        missing = [k for k in required if k not in d.files]
+        if missing:
+            raise KeyError(f"perm_result.npz missing keys: {missing}. Available keys: {d.files}")
+        data = {
+            "config": config,
+            "shuffled_scores_trials": np.asarray(d["shuffled_scores_trials"], dtype=float).ravel(),
+            "real_trial_acc": float(d["real_trial_acc"]),
+            "real_trial_std": float(d["real_trial_std"]),
+            "shuffled_trial_mean": float(d["shuffled_trial_mean"]),
+            "shuffled_trial_std": float(d["shuffled_trial_std"]),
+            "shuffled_trial_min": float(d["shuffled_trial_min"]),
+            "shuffled_trial_max": float(d["shuffled_trial_max"]),
+            "p_value_trial_two_tailed": float(d["p_value_trial_two_tailed"]),
+            "pass_alpha_0p05_trial": bool(d["pass_alpha_0p05_trial"]),
+        }
+
+    return data
+
+
+
+
+
+
+def load_sliding_window_permutation(run_dir):
+    """
+    Load saved sliding-window permutation results.
+
+    Expects:
+        run_dir/
+            config.json
+            perm_result.npz
+
+    Returns:
+        dict with:
+            centers
+            real_trial_curve
+            real_frame_curve
+            null_trial_acc
+            null_frame_acc
+            null_trial_mean
+            null_trial_sem
+            null_frame_mean
+            null_frame_sem
+            config
+    """
+
+    run_dir = Path(run_dir)
+
+    #Load config
+    config_path = run_dir / "config.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Missing config.json in {run_dir}")
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    #Load npz results
+    npz_path = run_dir / "perm_result.npz"
+    if not npz_path.exists():
+        raise FileNotFoundError(f"Missing perm_result.npz in {run_dir}")
+    data = np.load(npz_path, allow_pickle=True)
+    out = {"centers": data["centers"],
+        # real curves
+        "real_trial_curve": data.get("real_trial_curve"),
+        "real_frame_curve": data.get("real_frame_curve"),
+        # full null curves
+        "null_trial_acc": data.get("null_trial_acc"),
+        "null_frame_acc": data.get("null_frame_acc"),
+        # null mean ± sem
+        "null_trial_mean": data.get("null_trial_mean"),
+        "null_trial_sem": data.get("null_trial_sem"),
+        "null_frame_mean": data.get("null_frame_mean"),
+        "null_frame_sem": data.get("null_frame_sem"),
+        "config": config }
+
+    return out
+
+
+
+
+
+
+
+
 def load_data_from_config(config):
     """
     Load and prepare dataset exactly like training:
@@ -99,8 +218,12 @@ def load_data_from_config(config):
         data_dir=data_dir
     )
 
+    #pl.plot_superpixel_traces(np.mean(X_trials[:,10:125,:],axis=2), xs=100, ys=100, nsubplots=10)
+    
     # 2) z-score across all trials (pixelwise)
     X_z, mean, std = pre.zscore_dataset_pixelwise_trials(X_trials, baseline)
+    
+    #pl.plot_superpixel_traces(np.mean(X_z[:,10:125,1],axis=2), xs=100, ys=100, nsubplots=15)
 
     return X_z, y_trials
 

@@ -207,39 +207,40 @@ print("y shape:", y.shape)
 
 
 
-def zscore_dataset_pixelwise_trials(X, baseline_frames=(1, 24), eps: float = 1e-8, ddof: int = 0):
+def zscore_dataset_pixelwise_trials(X, baseline_frames=(0, 24), eps: float = 1e-8, ddof: int = 0):
     """
-    Pixel-wise Z-score:
-    - baseline MEAN computed per trial
-    - baseline STD pooled across trials
-
-    X shape: (pixels, frames, trials)
-
-    Returns:
-    X_z:   (pixels, frames, trials)
-    mean:  (pixels, 1, trials)
-    std:   (pixels, 1, 1)
+    Updated Pixel-wise Z-score:
+    1. Subtract trial-specific baseline mean from each trial.
+    2. Calculate STD of those 'mean-centered' baseline segments pooled across trials.
+    3. Divide by that pooled STD.
     """
     X = np.asarray(X, dtype=float)
-    if X.ndim != 3:
-        raise ValueError(f"X must be 3D (pixels, frames, trials). Got {X.shape}")
+    pixels, frames, trials = X.shape
 
     start, end = baseline_frames
-    if not (0 <= start < end <= X.shape[1]):
-        raise ValueError(f"baseline_frames {baseline_frames} out of bounds")
+    
+    # 1. Get the Baseline window
+    # Shape: (pixels, baseline_frames, trials)
+    baseline = X[:, start:end, :] 
+    
+    # 2. Calculate Mean per pixel PER TRIAL
+    # Shape: (pixels, 1, trials)
+    mean_per_trial = baseline.mean(axis=1, keepdims=True) 
+    
+    # 3. Subtract the mean from the whole data (Broadcasting)
+    # X_centered shape: (pixels, frames, trials)
+    X_centered = X - mean_per_trial
+    
+    # 4. Calculate STD across both 'frames' and 'trials' of the CENTERED baseline
+    # We use the centered baseline so the STD reflects variance after mean removal
+    baseline_centered = X_centered[:, start:end, :]
+    std_pooled = baseline_centered.std(axis=(1, 2), keepdims=True, ddof=ddof)
+    
+    # 5. Final Division (Z-score)
+    # Shape: (pixels, frames, trials)
+    X_z = X_centered / np.maximum(std_pooled, eps)
 
-    # Baseline window
-    baseline = X[:, start:end, :]          # (pixels, B, trials)
-    #Mean per pixel PER TRIAL
-    mean = baseline.mean(axis=1, keepdims=True)   # shape: (pixels, 1, trials)
-
-    #Std per pixel, pooled across trials
-    std = baseline.std(axis=(1, 2), keepdims=True, ddof=ddof)   # shape: (pixels, 1, 1)
-
-    #Z-score
-    X_z = (X - mean) / np.maximum(std, eps)
-
-    return X_z, mean, std
+    return X_z, mean_per_trial, std_pooled
 
 
 
@@ -255,7 +256,7 @@ def green_gray_magenta():
     With gray transitions to reduce visual bias.
     """
     colors = [
-        (0.0, "green"),
+        (0.0, "mediumblue"),  
         (0.1, "darkgray"),
         (0.3, "lightgray"),
         (0.5, "white"),
