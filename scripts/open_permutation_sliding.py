@@ -13,16 +13,10 @@ ourCmap = pre.green_gray_magenta()
 
 
 ### which permutation test to load and plot results from
-results_root = Path(r"C:\project\vsdi-face-decoding\results\permutation_test")
-test_root = results_root / "fixed_window__frame32-40__SVM_10fold__2026-02-18_17-43-53__permutation__perm2__seed42__2026-02-22_10-51-27" # <-- update this to your model folder you want to load and plot results from
+results_root = Path(r"C:\project\vsdi-face-decoding\results\permutation_test_sliding_window")
+test_root = results_root / "slidingwindow__perm100__seed42__2026-02-22_22-22-56" # <-- update this to your model folder you want to load and plot results from
 print("test_root:", test_root)
 prem_results = sr.load_sliding_window_permutation(str(test_root))
-mc.plot_sliding_window_permutation_trial_level(prem_results,
-                                                chance=0.5,
-                                                title="Sliding-window permutation test (trial-level)",
-                                                figsize=(7, 4),
-                                                ylim=(0.4, 1.0),
-                                                show_null_curves=True,
-                                                null_alpha=0.08)
+mc.plot_sliding_window_permutation_trial_level(prem_results)
 
 a=1

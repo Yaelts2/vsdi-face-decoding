@@ -2,8 +2,15 @@
 #
 # Runs a permutation test for an ALREADY-SAVED sliding-window run folder.
 # Rebuilds only the dataset features needed for permutation (X_roi + y_trials).
-
+import sys
 from pathlib import Path
+
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+print("Project root:", project_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from datetime import datetime
 import json
 import numpy as np
@@ -20,7 +27,7 @@ RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
 # Point to the specific sliding-window run folder you want to test
 RUN_DIR = RESULTS_ROOT / "sliding_window__frame15-125__SVM_5foldCV__2026-02-17_12-41-58"  # <- REPLACE
 
-N_PERMUTATIONS = 5
+N_PERMUTATIONS = 3
 PERM_SEED = 42
 
 # Save destination root:
@@ -90,8 +97,8 @@ perm_result = mc.sliding_window_permutation_test(X_pix_frames_trials=X_roi, y_tr
                                                 n_splits=n_splits,
                                                 n_perm=N_PERMUTATIONS,
                                                 seed=PERM_SEED,
-                                                return_null=True
-                                                return_perm_stats=True)          )
+                                                return_null=True,
+                                                return_perm_stats=True)          
 
 # 5) SAVE (no significance computed)
 PERM_ROOT.mkdir(parents=True, exist_ok=True)
@@ -123,15 +130,17 @@ np.savez_compressed(save_dir / "perm_result.npz",
                     centers=np.asarray(perm_result["centers"], dtype=int),
                     # Real curves from original run (if they exist)
                     real_trial_curve=np.asarray(real_results.get("trial_acc_mean", np.nan), dtype=float),
+                    real_fold_trial_acc=np.asarray(real_results.get("fold_trial_acc", np.nan), dtype=float),                    
                     real_frame_curve=np.asarray(real_results.get("frame_acc_mean", np.nan), dtype=float),
                     # Full null curves
                     null_trial_acc=np.asarray(perm_result["null_trial_acc"], dtype=float),   # (n_perm, n_windows)
                     null_frame_acc=np.asarray(perm_result["null_frame_acc"], dtype=float),   # (n_perm, n_windows)
-                    # Null mean ± SEM
+                    null_trial_folds=np.asarray(perm_result["null_trial_folds"], dtype=float ),
+                    # Null mean ± std
                     null_trial_mean=np.asarray(perm_result["null_trial_acc_mean"], dtype=float),
-                    null_trial_sem=np.asarray(perm_result["null_trial_acc_sem"], dtype=float),
+                    null_trial_std=np.asarray(perm_result["null_trial_acc_std"], dtype=float),
                     null_frame_mean=np.asarray(perm_result["null_frame_acc_mean"], dtype=float),
-                    null_frame_sem=np.asarray(perm_result["null_frame_acc_sem"], dtype=float))
+                    null_frame_std=np.asarray(perm_result["null_frame_acc_std"], dtype=float))
 
 print("Saved sliding-window permutation results to:")
 print(" ", save_dir)

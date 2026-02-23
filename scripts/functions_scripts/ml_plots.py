@@ -23,6 +23,7 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
                         title: str | None = None,
                         ylim: tuple[float, float] | None = None,
                         xlim: tuple[float, float] | None = None,
+                        frames: tuple[float, float] | None = None,
                         enable_popout: bool = True,
                         popout_double_click: bool = True,
                         popout_figsize: tuple[float, float] = (7, 4.5)):
@@ -71,7 +72,6 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
     if xs * ys != npix:
         raise ValueError(f"pixels ({npix}) != xs*ys ({xs*ys}). Check xs/ys.")
 
-    # MATLAB-style: pixperplot = floor(xs / nsubplots)
     xbin = int(xs // nsubplots)
     ybin = int(ys // nsubplots)
     if xbin < 1 or ybin < 1:
@@ -80,14 +80,11 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
     ncols = xs // xbin
     nrows = ys // ybin
 
-    # Effective size (cropping like MATLAB fix())
     xs_eff = ncols * xbin
     ys_eff = nrows * ybin
 
-    # -------- Vectorized binning (no loops over pixels) --------
     # Convert (pixels, frames, conds) -> (ys, xs, frames, conds)
     img = X.reshape(ys, xs, nframes, nconds)
-
     # Crop to multiples of bin size
     img = img[:ys_eff, :xs_eff, :, :]  # (ys_eff, xs_eff, frames, conds)
 
@@ -99,7 +96,7 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
     # Flatten blocks into (nplots, frames, conds)
     binned = b.reshape(nrows * ncols, nframes, nconds)
 
-    # -------- Plotting --------
+    # Plotting 
     fig_w = max(6, 2.2 * ncols)
     fig_h = max(6, 2.2 * nrows)
     fig, axes = plt.subplots(nrows, ncols, figsize=(fig_w, fig_h), sharex=True, sharey=True)
@@ -107,34 +104,28 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 
     if title:
         fig.suptitle(title, y=0.99)
-
     for r in range(nrows):
         for c in range(ncols):
             i = r * ncols + c
             ax = axes[r, c]
-
-            # Tiny-subplot style (like your MATLAB): no tick labels
+            # Tiny-subplot style 
             ax.set_xticks([])
             ax.set_yticks([])
-
             if overlay:
                 for k in range(nconds):
                     ax.plot(binned[i, :, k], linewidth=1.0)
             else:
                 ax.plot(binned[i, :, 0], linewidth=1.0)
-
             if ylim is not None:
                 ax.set_ylim(*ylim)
             if xlim is not None:
                 ax.set_xlim(*xlim)
-
     fig.tight_layout(rect=(0, 0, 1, 0.97))
 
-    # -------- Optional: double-click popout --------
+    # Optional: double-click popout
     cid = None
     if enable_popout:
         ax_to_idx = {axes[r, c]: (r * ncols + c) for r in range(nrows) for c in range(ncols)}
-
         def _on_click(event):
             if popout_double_click and not getattr(event, "dblclick", False):
                 return
@@ -144,12 +135,10 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 
             i = ax_to_idx[ax]
             rr, cc = divmod(i, ncols)
-
             pop_fig, pop_ax = plt.subplots(figsize=popout_figsize)
             pop_ax.set_title(f"Superpixel {i} (row={rr}, col={cc})")
             pop_ax.set_xlabel("Frame")
             pop_ax.set_ylabel("Activation")
-
             if overlay and nconds > 1:
                 for k in range(nconds):
                     pop_ax.plot(binned[i, :, k], linewidth=1.6, label=f"cond {k}")
@@ -165,6 +154,9 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
                 pop_ax.set_ylim(*ylim)
             if xlim is not None:
                 pop_ax.set_xlim(*xlim)
+            if frames is not None:
+                pop_ax.set_xticks(range(0, len(frames), 10))
+                pop_ax.set_xticklabels(frames[0::10])
 
             pop_fig.tight_layout()
             pop_fig.show()
@@ -173,6 +165,15 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 
     return binned, fig, axes, cid
 
+#example usage
+'''
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_110209a.npy")
+x_avg = x.mean(axis=2)
+x_avg_frames =  x_avg[:, 25:120]
+frame_ids = list(range(25, 120))     # 25..80 (56 frames)
+binned, fig, axes, cid =plot_superpixel_traces(x_avg_frames, xs=100, ys=100, nsubplots=10,overlay=False, frames=frame_ids )
+plt.show()
+'''
 
 
 
@@ -524,15 +525,13 @@ def plot_metric_hist(fold_values,chance= 0.5,
 # Confusion matrix + ROC (OOF-based)
 # -----------------------------
 
-def plot_confusion_matrix(
-    y_true=None,
-    y_pred=None,
-    results: dict | None = None,
-    class_names=("Non-face", "Face"),
-    title="Confusion matrix",
-    figsize=(5.5, 4.8),
-    show_counts=True,
-):
+def plot_confusion_matrix(y_true=None,
+                        y_pred=None,
+                        results: dict | None = None,
+                        class_names=("Non-face", "Face"),
+                        title="Confusion matrix",
+                        figsize=(5.5, 4.8),
+                        show_counts=True):
     """
     Row-normalized confusion matrix with optional count overlay.
     Use either (y_true, y_pred) OR pass results dict containing oof arrays.

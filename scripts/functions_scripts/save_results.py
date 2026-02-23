@@ -12,12 +12,11 @@ import json
 import numpy as np
 
 
-def _sem(x) -> float:
+def _sem(x, axis=0):
     x = np.asarray(x, dtype=float)
-    x = x[~np.isnan(x)]
-    if x.size <= 1:
-        return np.nan
-    return float(np.std(x, ddof=1) / np.sqrt(x.size))
+    n = np.sum(~np.isnan(x), axis=axis)
+    sd = np.nanstd(x, axis=axis, ddof=1)
+    return sd / np.sqrt(n)
 
 def save_experiment(results_root: str | Path,experiment: str, experiment_tag: str,
                         results: dict,
@@ -88,35 +87,21 @@ def load_experiment(run_dir):
 
 
 
-def load_permutation_run(run_dir):
-    """
-    Load a saved (single-window) permutation run for plotting.
-    """
+
+def load_permutation_run(run_dir: str):
     run_dir = Path(run_dir)
-    config_path = run_dir / "config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Missing config.json in {run_dir}")
-    with config_path.open("r", encoding="utf-8") as f:
+
+    with open(run_dir / "config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
-    perm_path = run_dir / "perm_result.npz"
-    if not perm_path.exists():
-        raise FileNotFoundError(f"Missing perm_result.npz in {run_dir}")
-    with np.load(perm_path, allow_pickle=False) as d:
-        required = ["shuffled_scores_trials",
-                    "real_trial_acc",
-                    "real_trial_std",
-                    "shuffled_trial_mean",
-                    "shuffled_trial_std",
-                    "shuffled_trial_min",
-                    "shuffled_trial_max",
-                    "p_value_trial_two_tailed",
-                    "pass_alpha_0p05_trial"]
-        missing = [k for k in required if k not in d.files]
-        if missing:
-            raise KeyError(f"perm_result.npz missing keys: {missing}. Available keys: {d.files}")
-        data = {
+
+    d = np.load(run_dir / "perm_result.npz", allow_pickle=False)
+    keys = set(d.files)
+
+    # new schema (trial + frame)
+    if "shuffled_scores_trials" in keys:
+        return {
             "config": config,
-            "shuffled_scores_trials": np.asarray(d["shuffled_scores_trials"], dtype=float).ravel(),
+            "shuffled_scores_trials": d["shuffled_scores_trials"].ravel(),
             "real_trial_acc": float(d["real_trial_acc"]),
             "real_trial_std": float(d["real_trial_std"]),
             "shuffled_trial_mean": float(d["shuffled_trial_mean"]),
@@ -125,10 +110,29 @@ def load_permutation_run(run_dir):
             "shuffled_trial_max": float(d["shuffled_trial_max"]),
             "p_value_trial_two_tailed": float(d["p_value_trial_two_tailed"]),
             "pass_alpha_0p05_trial": bool(d["pass_alpha_0p05_trial"]),
+            # optional extras if present
+            "shuffled_scores_frames": d["shuffled_scores_frames"].ravel() if "shuffled_scores_frames" in keys else None,
+            "real_frame_acc": float(d["real_frame_acc"]) if "real_frame_acc" in keys else None,
+            "real_frame_std": float(d["real_frame_std"]) if "real_frame_std" in keys else None,
         }
 
-    return data
-
+    # old schema (legacy)
+    return {
+        "config": config,
+        "shuffled_scores_trials": d["shuffled_scores"].ravel(),
+        "real_trial_acc": float(d["real_score"]),
+        "real_trial_std": float(d["real_std"]),
+        "shuffled_trial_mean": float(d["shuffled_mean"]),
+        "shuffled_trial_std": float(d["shuffled_std"]),
+        "shuffled_trial_min": float(d["shuffled_min"]),
+        "shuffled_trial_max": float(d["shuffled_max"]),
+        "p_value_trial_two_tailed": float(d["p_value"]),
+        "pass_alpha_0p05_trial": bool(d["pass_alpha_0p05"]),
+        # legacy has no frame-level fields
+        "shuffled_scores_frames": None,
+        "real_frame_acc": None,
+        "real_frame_std": None,
+    }
 
 
 

@@ -1,0 +1,16 @@
+{
+  "source_run_dir": "C:\\project\\vsdi-face-decoding\\results\\sliding_window__frame15-125__SVM_5foldCV__2026-02-17_12-41-58",
+  "source_model_name": "sliding_window__frame15-125__SVM_5foldCV__2026-02-17_12-41-58",
+  "n_permutations": 3,
+  "perm_seed": 42,
+  "baseline_frames": [
+    1,
+    24
+  ],
+  "window_size": 5,
+  "start_frame": 15,
+  "stop_frame": 125,
+  "step": 1,
+  "n_splits": 5,
+  "estimator": "linear SVM"
+}

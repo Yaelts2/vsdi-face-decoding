@@ -2,8 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import accuracy_score
-from functions_scripts import feature_extraction as fe
-from functions_scripts import ml_cv as cv
+from scripts.functions_scripts import feature_extraction as fe
+from scripts.functions_scripts import ml_cv as cv
+from scripts.functions_scripts import save_results as sr
 
 
 
@@ -41,8 +42,8 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
     gkf = GroupKFold(n_splits=n_splits)
 
     centers = []
-    frame_acc_mean, frame_acc_sem = [], []
-    trial_acc_mean, trial_acc_sem = [], []
+    frame_acc_mean, frame_acc_std = [], []
+    trial_acc_mean, trial_acc_std = [], []
     w_mean_windows = []
     w_sem_windows = []  
 
@@ -88,9 +89,9 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
         W_folds = np.vstack(W_folds)  # (n_folds, n_features)
         centers.append(center)
         frame_acc_mean.append(float(np.mean(fold_acc_f)))
-        frame_acc_sem.append(_sem(fold_acc_f))
+        frame_acc_std.append(np.std(fold_acc_f))
         trial_acc_mean.append(float(np.mean(fold_acc_t)))
-        trial_acc_sem.append(_sem(fold_acc_t))
+        trial_acc_std.append(np.std(fold_acc_t))
 
         w_mean_windows.append(np.mean(W_folds, axis=0))
         w_sem_windows.append(np.std(W_folds, axis=0, ddof=1) if W_folds.shape[0] > 1 else np.full(W_folds.shape[1], np.nan))
@@ -103,9 +104,9 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
     out = {
         "centers": np.asarray(centers),
         "frame_acc_mean": np.asarray(frame_acc_mean),
-        "frame_acc_sem":  np.asarray(frame_acc_sem),
+        "frame_acc_std":  np.asarray(frame_acc_std),
         "trial_acc_mean": np.asarray(trial_acc_mean), # (n_windows,)
-        "trial_acc_sem":  np.asarray(trial_acc_sem),
+        "trial_acc_std":  np.asarray(trial_acc_std),
         "w_mean_windows": np.vstack(w_mean_windows),  # (n_windows, n_features)
         "w_sem_windows":  np.vstack(w_sem_windows),   # (n_windows, n_features) diagnostic
         "fold_frame_acc": np.asarray(fold_frame_acc), # (n_windows, n_splits)
@@ -123,7 +124,7 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
     return out
 
 
-def plot_sliding_window_accuracy_with_sem(res: dict,
+def plot_sliding_window_accuracy_with_std(res: dict,
                                         chance: float = 0.5,
                                         title: str = "Sliding-window decoding accuracy",
                                         xlabel: str = "Frame (window center)",
@@ -140,27 +141,27 @@ def plot_sliding_window_accuracy_with_sem(res: dict,
         Output from sliding_window_decode_with_stats / sliding_window_decode_with_stats-like function.
         Must contain:
         - centers
-        - frame_acc_mean, frame_acc_sem
-        - trial_acc_mean, trial_acc_sem
+        - frame_acc_mean, frame_acc_std
+        - trial_acc_mean, trial_acc_std
     chance : float
         Chance accuracy line (e.g., 0.5 for binary).
     """
 
     centers = np.asarray(res["centers"])
     f_mean  = np.asarray(res["frame_acc_mean"])
-    f_sem   = np.asarray(res["frame_acc_sem"])
+    f_std   = np.asarray(res["frame_acc_std"])
     t_mean  = np.asarray(res["trial_acc_mean"])
-    t_sem   = np.asarray(res["trial_acc_sem"])
+    t_std   = np.asarray(res["trial_acc_std"])
 
     plt.figure(figsize=figsize)
 
     # Frame-level curve + SEM
     plt.plot(centers, f_mean, label="Frame-level accuracy")
-    plt.fill_between(centers, f_mean - f_sem, f_mean + f_sem, alpha=0.2)
+    plt.fill_between(centers, f_mean - f_std, f_mean + f_std, alpha=0.2)
 
     # Trial-level curve + SEM
     plt.plot(centers, t_mean, label="Trial-level accuracy (majority vote)")
-    plt.fill_between(centers, t_mean - t_sem, t_mean + t_sem, alpha=0.2)
+    plt.fill_between(centers, t_mean - t_std, t_mean + t_std, alpha=0.2)
 
     # Optional points
     if show_points:
