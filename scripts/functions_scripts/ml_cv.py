@@ -479,10 +479,14 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
 
     outer_splits = get_splits(outer_splitter, X, y, groups)
 
-    # OOF containers (full coverage by construction if outer splitter is full-coverage)
+    # OOF containers 
     n = y.shape[0]
     oof_pred = np.full(n, -1, dtype=int)
     oof_scores = np.full(n, np.nan, dtype=float)
+
+    #trial-level OOF containers 
+    oof_trial_true: List[int] = []
+    oof_trial_pred: List[int] = []
 
     outer_folds: List[Dict[str, Any]] = []
     chosen_Cs: List[float] = []
@@ -513,13 +517,16 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
         acc = float(np.mean(y_pred == y_te))
         auc, scores = compute_auc(clf, X_te, y_te)
 
-        #accuracy across trials (majority vote across frames)
+        # accuracy across trials (majority vote across frames)
         g_te = groups[te_idx]
-        y_true_trial, y_pred_trial= majority_vote_trial_predictions(y_pred, y_te, g_te)
+        y_true_trial, y_pred_trial = majority_vote_trial_predictions(y_pred, y_te, g_te)
         acc_trial = float(np.mean(y_pred_trial == y_true_trial))
-        # ----------------------------------------------------------
 
-        # Fill OOF
+        #accumulate trial-level OOF arrays across folds
+        oof_trial_true.extend(np.asarray(y_true_trial, dtype=int).ravel().tolist())
+        oof_trial_pred.extend(np.asarray(y_pred_trial, dtype=int).ravel().tolist())
+    
+        # Fill OOF (frame-level)
         te_idx = np.asarray(te_idx, dtype=int)
         oof_pred[te_idx] = y_pred.astype(int)
         if scores is not None:
@@ -565,13 +572,19 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
         "chosen_Cs": chosen_Cs,
         "final_C": float(final_C),
 
-        # OOF for figures (frame-level)
+        # OOF (frame-level)
         "oof_y_true": y,
         "oof_pred": oof_pred,
         "oof_scores": oof_scores,
         "oof_has_score": np.isfinite(oof_scores),
         "confusion_matrix": confusion_matrix(y, oof_pred),
+        
     }
+
+    #trial-level OOF arrays + confusion matrix
+    out["oof_y_true_trial"] = np.asarray(oof_trial_true, dtype=int)
+    out["oof_pred_trial"] = np.asarray(oof_trial_pred, dtype=int)
+    out["confusion_matrix_trial"] = confusion_matrix(out["oof_y_true_trial"], out["oof_pred_trial"])
 
     # mean fold weights (stability map)
     if len(fold_weights) > 0:

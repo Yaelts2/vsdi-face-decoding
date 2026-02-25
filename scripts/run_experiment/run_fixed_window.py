@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+print("Project root:", project_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 import matplotlib.pyplot as plt
 from scripts.functions_scripts import preprocessing_functions as pre

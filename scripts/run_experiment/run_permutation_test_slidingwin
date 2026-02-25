@@ -1,7 +1,4 @@
 # run_permutation_test_sliding_window.py
-#
-# Runs a permutation test for an ALREADY-SAVED sliding-window run folder.
-# Rebuilds only the dataset features needed for permutation (X_roi + y_trials).
 import sys
 from pathlib import Path
 

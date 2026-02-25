@@ -10,6 +10,8 @@ from pathlib import Path
 from datetime import datetime
 import json
 import numpy as np
+import matplotlib.pyplot as plt
+from scripts.functions_scripts import ml_plots as pl
 
 
 def _sem(x, axis=0):
@@ -85,9 +87,6 @@ def load_experiment(run_dir):
     return config, results, ROI_mask_path
 
 
-
-
-
 def load_permutation_run(run_dir: str):
     run_dir = Path(run_dir)
 
@@ -133,9 +132,6 @@ def load_permutation_run(run_dir: str):
         "real_frame_acc": None,
         "real_frame_std": None,
     }
-
-
-
 
 
 def load_sliding_window_permutation(run_dir):
@@ -221,13 +217,15 @@ def load_data_from_config(config):
         nonface_file=nonface_file,
         data_dir=data_dir
     )
-
-    #pl.plot_superpixel_traces(np.mean(X_trials[:,10:125,:],axis=2), xs=100, ys=100, nsubplots=10)
     
     # 2) z-score across all trials (pixelwise)
     X_z, mean, std = pre.zscore_dataset_pixelwise_trials(X_trials, baseline)
-    
-    #pl.plot_superpixel_traces(np.mean(X_z[:,10:125,1],axis=2), xs=100, ys=100, nsubplots=15)
-
+    '''
+    x_avg_frames =  X_z[:, 25:75,0:27]
+    x_avg_frames = np.nanmean(x_avg_frames,axis=2)
+    frame_ids = list(range(25, 75))     # 25..80 (56 frames)
+    binned, fig, axes, cid =pl.plot_superpixel_traces(x_avg_frames, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
+    plt.show()
+    '''
     return X_z, y_trials
 

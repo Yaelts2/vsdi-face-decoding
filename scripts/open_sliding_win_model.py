@@ -1,6 +1,11 @@
 from pathlib import Path
+import sys
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+print("Project root:", project_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
-from pathlib import Path
 import matplotlib.pyplot as plt
 from functions_scripts import preprocessing_functions as pre
 from functions_scripts import ml_evaluation as ev
@@ -18,7 +23,7 @@ ourCmap = pre.green_gray_magenta()
 ### which model to load and plot results from
 
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "sliding_window__frame15-125__SVM_5foldCV__2026-02-17_12-41-58" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "sliding_window__frame0-125__SVM_5foldCV__2026-02-24_17-34-36" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 
@@ -44,6 +49,12 @@ print("X_ROI shape:", X_ROI.shape)
 W_img=ev.window_weights_to_pixel_time_matrix(results_sliding_window["w_mean_windows"], ROI_mask, pixels=100)
 print(W_img.shape) #(pixels, frames) where frames correspond to window centers
 pl.mimg(W_img, xsize=100, ysize=100, low=-0.0002, high=0.0002, frames=results_sliding_window["centers"])
+frame_ids = np.arange(0, 43)         
+weights=W_img[:,0:43]
+X_avg, labels_ms, bin_frames = pl.avg_consecutive_frames_with_ms_labels(X=weights, frame_ids=frame_ids, avg_n=2, dt_ms=10, zero_frame=27
+)
+fig,axes_flat =pl.mimg(X_avg, xsize=100, ysize=100, low=-0.002, high=0.002,frames=labels_ms.astype(int), width=14,colormap=ourCmap)
+plt.show()
 
 
 #mimg of positive and negative weight masks across windows
@@ -52,9 +63,11 @@ pl.mimg(pos_masks, xsize=100, ysize=100, low='auto', high=None, frames=results_s
 pl.mimg(neg_masks, xsize=100, ysize=100, low=0, high=1, frames=results_sliding_window["centers"])
 
 
-sw.plot_sliding_window_accuracy_with_sem(res=results_sliding_window,
-                                        chance=0.5,
-                                        title="Sliding Window Decoding (5-frame window)")
+sw.plot_sliding_window_accuracy_with_std(
+    results_sliding_window,
+    zero_frame=27,          # frame 27 = 0 ms
+    frame_duration_ms=10,   # 10 ms per frame
+)
 
 
 # weights movie

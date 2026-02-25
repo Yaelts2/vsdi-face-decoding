@@ -1,0 +1,30 @@
+{
+  "experiment": "fixed_window",
+  "tag": "frame32-40__SVM_10fold",
+  "n_trials_per_class": 28,
+  "face_file": "condsXn1_110209a.npy",
+  "nonface_file": "condsXn5_110209a.npy",
+  "data_dir": "data/processed/condsXn/",
+  "window": [
+    32,
+    40
+  ],
+  "zscore_baseline_frames": [
+    1,
+    24
+  ],
+  "metric": "acc",
+  "C_grid": [
+    0.0001,
+    0.001,
+    0.01,
+    0.1,
+    1.0,
+    10.0,
+    100.0
+  ],
+  "rule": "one_se",
+  "tie_break": "smaller_C",
+  "outer_cv": "GroupKFold(n_splits=10)",
+  "inner_cv": "GroupKFold(n_splits=4)"
+}

@@ -1,3 +1,10 @@
+from pathlib import Path
+import sys
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+print("Project root:", project_root)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 import matplotlib.pyplot as plt
 from scripts.functions_scripts import preprocessing_functions as pre
@@ -25,12 +32,12 @@ data_dir= "data/processed/condsXn/"
 Baseline_frames_zscore= (1, 24)
 
 # Feature extraction:
-ROI_mask_path= "data/processed/ROI_onlyV24_mask.npy"
+ROI_mask_path= "data/processed/ROI_mask2.npy"
 
 # Model :
 model=lambda: cv.make_linear_svm(C=0.0001, max_iter=100000)
 window_size=int(5)  # number of frames in sliding window
-start_frame=int(15) # first center frame to decode (e.g. 15 means window covers frames 13-17)
+start_frame=int(0) # first center frame to decode (e.g. 15 means window covers frames 13-17)
 stop_frame=int(125) # last center frame to decode (e.g. 125 means window covers frames 123-127, but if stop_frame=126 it would be last center frame 124 with window covering 122-126)
 step=int(1) # step size to move window (e.g. 1 means decode every center frame, 5 means decode every 5th center frame)
 n_splits=int(5) # kfold for each window
@@ -87,7 +94,7 @@ results = sw.sliding_window_decode_with_stats(X_roi,      # shape: (8518, 256, 5
                                             n_splits)
 
 # --- Plot results ---
-sw.plot_sliding_window_accuracy_with_sem(res=results,
+sw.plot_sliding_window_accuracy_with_std(res=results,
                                         chance=0.5,
                                         title="Sliding Window Decoding (5-frame window)")
 

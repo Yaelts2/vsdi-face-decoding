@@ -169,9 +169,9 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 '''
 x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_110209a.npy")
 x_avg = x.mean(axis=2)
-x_avg_frames =  x_avg[:, 25:120]
-frame_ids = list(range(25, 120))     # 25..80 (56 frames)
-binned, fig, axes, cid =plot_superpixel_traces(x_avg_frames, xs=100, ys=100, nsubplots=10,overlay=False, frames=frame_ids )
+x_avg_frames =  x_avg[:, 25:75]
+frame_ids = list(range(25, 75))     # 25..80 (56 frames)
+binned, fig, axes, cid =plot_superpixel_traces(x_avg_frames, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
 plt.show()
 '''
 
@@ -223,7 +223,7 @@ def avg_consecutive_frames_with_ms_labels(X, frame_ids, avg_n=2, dt_ms=10, zero_
     return X_avg, labels_ms, bin_frames
 
 
-def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
+def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0,colormap='jet'):
     # Ensure 2D input
     if x.ndim == 1:
         x = x.reshape(-1, 1)
@@ -247,7 +247,7 @@ def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
         ax = axes_flat[i]
         img_data = x[:, i].reshape((ysize, xsize), order='C')
         im = ax.imshow(img_data,
-                    cmap='jet',
+                    cmap=colormap,
                     vmin=v_mins[i],
                     vmax=v_maxs[i],
                     origin='upper')
@@ -268,7 +268,7 @@ def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0):
 
 #example usage
 '''
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_110209a.npy")
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
 x_avg = x.mean(axis=2)
 x_avg_frames =  x_avg[:, 25:81]
 frame_ids = np.arange(25, 81)          # 25..80 (56 frames)
@@ -418,32 +418,32 @@ def plot_frame_vs_trial_bars(results, chance= 0.5, title: str = "Frame vs Trial 
     sem_t = float(np.nanstd(acc_trial, ddof=1) / np.sqrt(k)) if k > 1 else np.nan
 
     plt.figure(figsize=figsize)
-    plt.bar(x - width/2, acc_frame, width=width, alpha=0.85, label="Frame acc",color='cornflowerblue')
-    plt.bar(x + width/2, acc_trial, width=width, alpha=0.85, label="Trial acc (vote)",color='mediumblue')
-    plt.axhline(chance, linestyle="--", linewidth=2, label="Chance")
+    plt.bar(x - width/2, acc_frame, width=width, alpha=0.85, label="Frame acc",color='mediumpurple')
+    plt.bar(x + width/2, acc_trial, width=width, alpha=0.85, label="Trial acc (vote)",color='navy')
+    plt.axhline(chance, linestyle="--", linewidth=1, label="Chance",color='black')
 
     # Optional mean ± SEM markers (placed to the right)
     if show_mean_sem:
         mean_x = k + 0.6
         # Frame mean
         if np.isfinite(sem_f):
-            plt.errorbar(mean_x - 0.12, mean_f, yerr=sem_f, fmt="o", capsize=6, linewidth=2, color='cornflowerblue')
+            plt.errorbar(mean_x - 0.12, mean_f, yerr=sem_f, fmt="o", capsize=6, linewidth=2, color='mediumpurple')
             plt.text(mean_x - 0.12, mean_f + 0.02, f"{mean_f:.2f}±{sem_f:.2f}",
-                    ha="center", va="top", fontsize=13, fontweight="bold", color='cornflowerblue')
+                    ha="center", va="top", fontsize=18, fontweight="bold", color='mediumpurple')
         else:
             plt.plot([mean_x - 0.12], [mean_f], "o")
             plt.text(mean_x - 0.12, mean_f + 0.02, f"{mean_f:.2f}",
-                    ha="center", va="top", fontsize=11, fontweight="bold")
+                    ha="center", va="top", fontsize=18, fontweight="bold")
 
         # Trial mean
         if np.isfinite(sem_t):
-            plt.errorbar(mean_x + 0.12, mean_t, yerr=sem_t, fmt="o", capsize=6, linewidth=2, color='mediumblue')
+            plt.errorbar(mean_x + 0.12, mean_t, yerr=sem_t, fmt="o", capsize=6, linewidth=2, color='navy')
             plt.text(mean_x + 0.12, mean_t + 0.02, f"{mean_t:.2f}±{sem_t:.2f}",
-                    ha="center", va="top", fontsize=13, fontweight="bold", color='mediumblue')
+                    ha="center", va="top", fontsize=18, fontweight="bold", color='navy')
         else:
             plt.plot([mean_x + 0.12], [mean_t], "o")
             plt.text(mean_x + 0.12, mean_t + 0.02, f"{mean_t:.2f}",
-                    ha="center", va="top", fontsize=11, fontweight="bold")
+                    ha="center", va="top", fontsize=18, fontweight="bold")
 
         # Extend x-axis ticks to include "Mean"
         plt.xticks(
@@ -531,7 +531,8 @@ def plot_confusion_matrix(y_true=None,
                         class_names=("Non-face", "Face"),
                         title="Confusion matrix",
                         figsize=(5.5, 4.8),
-                        show_counts=True):
+                        show_counts=True,
+                        colormap='Blues'):
     """
     Row-normalized confusion matrix with optional count overlay.
     Use either (y_true, y_pred) OR pass results dict containing oof arrays.
@@ -550,14 +551,14 @@ def plot_confusion_matrix(y_true=None,
     cm = np.divide(cm_counts, np.maximum(row_sums, 1), dtype=float)
 
     plt.figure(figsize=figsize)
-    im = plt.imshow(cm, vmin=0, vmax=1, cmap='Blues')
+    im = plt.imshow(cm, vmin=0, vmax=1, cmap=colormap)
     cbar = plt.colorbar(im)
     cbar.ax.tick_params(labelsize=11)
     cbar.set_label("Proportion", fontsize=12)
 
     n = len(class_names)
-    plt.xticks(np.arange(n), class_names, fontsize=12)
-    plt.yticks(np.arange(n), class_names, fontsize=12)
+    plt.xticks(np.arange(n), class_names, fontsize=15)
+    plt.yticks(np.arange(n), class_names, fontsize=15)
     plt.xlabel("Predicted label", fontsize=14)
     plt.ylabel("True label", fontsize=14)
     plt.title(title, fontsize=16, fontweight="bold")
@@ -568,12 +569,10 @@ def plot_confusion_matrix(y_true=None,
             txt = f"{val:.2f}"
             if show_counts:
                 txt += f"\n(n={cm_counts[i, j]})"
-            plt.text(
-                j, i, txt,
-                ha="center", va="center",
-                fontsize=12, fontweight="bold",
-                color="white" if val >= 0.5 else "black",
-            )
+            plt.text(j, i, txt,
+                    ha="center", va="center",
+                    fontsize=15, fontweight="bold",
+                    color="white" if val >= 0.5 else "black"            )
 
     plt.tight_layout()
     plt.show()

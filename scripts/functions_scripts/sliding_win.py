@@ -125,62 +125,58 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
 
 
 def plot_sliding_window_accuracy_with_std(res: dict,
+                                        zero_frame: int = 27,
+                                        frame_duration_ms: float = 10.0,
                                         chance: float = 0.5,
                                         title: str = "Sliding-window decoding accuracy",
-                                        xlabel: str = "Frame (window center)",
+                                        xlabel: str = "Time (ms)",
                                         ylabel: str = "Accuracy",
                                         ylim=(0.4, 1.0),
                                         figsize=(8, 4),
                                         show_points: bool = True):
-    """
-    Plot frame-level and trial-level accuracy across sliding windows with SEM shading.
 
-    Parameters
-    ----------
-    res : dict
-        Output from sliding_window_decode_with_stats / sliding_window_decode_with_stats-like function.
-        Must contain:
-        - centers
-        - frame_acc_mean, frame_acc_std
-        - trial_acc_mean, trial_acc_std
-    chance : float
-        Chance accuracy line (e.g., 0.5 for binary).
-    """
+    centers = np.asarray(res["centers"], dtype=float)
 
-    centers = np.asarray(res["centers"])
+    # ---- convert frames -> ms relative to zero_frame ----
+    time_ms = (centers - zero_frame) * frame_duration_ms
+
     f_mean  = np.asarray(res["frame_acc_mean"])
     f_std   = np.asarray(res["frame_acc_std"])
     t_mean  = np.asarray(res["trial_acc_mean"])
     t_std   = np.asarray(res["trial_acc_std"])
 
     plt.figure(figsize=figsize)
+    ax = plt.gca()
 
-    # Frame-level curve + SEM
-    plt.plot(centers, f_mean, label="Frame-level accuracy")
-    plt.fill_between(centers, f_mean - f_std, f_mean + f_std, alpha=0.2)
+    # Frame-level
+    ax.plot(time_ms, f_mean, label="Frame-level accuracy")
+    ax.fill_between(time_ms, f_mean - f_std, f_mean + f_std, alpha=0.2)
 
-    # Trial-level curve + SEM
-    plt.plot(centers, t_mean, label="Trial-level accuracy (majority vote)")
-    plt.fill_between(centers, t_mean - t_std, t_mean + t_std, alpha=0.2)
+    # Trial-level
+    ax.plot(time_ms, t_mean, label="Trial-level accuracy (majority vote)")
+    ax.fill_between(time_ms, t_mean - t_std, t_mean + t_std, alpha=0.2)
 
-    # Optional points
     if show_points:
-        plt.scatter(centers, f_mean, s=12)
-        plt.scatter(centers, t_mean, s=12)
+        ax.scatter(time_ms, f_mean, s=12)
+        ax.scatter(time_ms, t_mean, s=12)
 
     # Chance line
     if chance is not None:
-        plt.axhline(chance, linestyle="--", linewidth=1, label=f"Chance = {chance:g}")
+        ax.axhline(chance, linestyle="--", linewidth=1, label=f"Chance = {chance:g}")
 
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
+    # Stimulus onset line (0 ms)
+    ax.axvline(0, linestyle="--", linewidth=1)
+
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+
     if ylim is not None:
-        plt.ylim(*ylim)
-    plt.legend()
+        ax.set_ylim(*ylim)
+
+    ax.legend()
     plt.tight_layout()
     plt.show()
-
 
 
 
