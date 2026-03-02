@@ -22,7 +22,7 @@ from scripts.functions_scripts import save_results as sr
 RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
 
 # Point to the specific sliding-window run folder you want to test
-RUN_DIR = RESULTS_ROOT / "sliding_window__frame15-125__SVM_5foldCV__2026-02-17_12-41-58"  # <- REPLACE
+RUN_DIR = RESULTS_ROOT / "sliding_window__frame0-100__SVM_5foldCV__2026-02-25_15-08-54"  # <- REPLACE
 
 N_PERMUTATIONS = 3
 PERM_SEED = 42
@@ -127,7 +127,7 @@ np.savez_compressed(save_dir / "perm_result.npz",
                     centers=np.asarray(perm_result["centers"], dtype=int),
                     # Real curves from original run (if they exist)
                     real_trial_curve=np.asarray(real_results.get("trial_acc_mean", np.nan), dtype=float),
-                    real_fold_trial_acc=np.asarray(real_results.get("fold_trial_acc", np.nan), dtype=float),                    
+                    real_fold_trial_acc=np.asarray(real_results.get("fold_trial_acc", np.nan), dtype=float),  # (n_folds, acc)                   
                     real_frame_curve=np.asarray(real_results.get("frame_acc_mean", np.nan), dtype=float),
                     # Full null curves
                     null_trial_acc=np.asarray(perm_result["null_trial_acc"], dtype=float),   # (n_perm, n_windows)

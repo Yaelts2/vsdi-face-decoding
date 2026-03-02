@@ -30,7 +30,7 @@ data_dir= "data/processed/condsXn/"
 Baseline_frames_zscore= (1, 24)
 
 # Feature extraction:
-window= (32, 40)  #(start, end)
+window= (47, 55)  #(start, end)
 ROI_mask_path= "data/processed/ROI_mask2.npy"
 
 

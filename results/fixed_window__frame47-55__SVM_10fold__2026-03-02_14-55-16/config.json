@@ -1,13 +1,13 @@
 {
   "experiment": "fixed_window",
-  "tag": "frame32-40__SVM_10fold",
+  "tag": "frame47-55__SVM_10fold",
   "n_trials_per_class": 28,
   "face_file": "condsXn1_110209a.npy",
   "nonface_file": "condsXn5_110209a.npy",
   "data_dir": "data/processed/condsXn/",
   "window": [
-    32,
-    40
+    47,
+    55
   ],
   "zscore_baseline_frames": [
     1,

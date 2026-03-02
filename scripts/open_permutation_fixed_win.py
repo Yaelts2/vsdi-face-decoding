@@ -20,4 +20,7 @@ print("test_root:", test_root)
 prem_results = sr.load_permutation_run(str(test_root))
 mc.plot_permutation_test_trial(prem_results, bins=30, figsize=(7, 4), title='permutation test for fixed window run (frame 32-40) distribution of trial-level accuracy')
 plt.show()
+print(f"p_value_trial_two_tailed= {prem_results["p_value_trial_two_tailed"]}")
+print(f"pass_alpa_0p05_trial= {prem_results["pass_alpha_0p05_trial"]}")
+
 a=1

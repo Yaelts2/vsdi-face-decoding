@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.stats import mannwhitneyu
 from scripts.functions_scripts import ml_cv as cv
 from scripts.functions_scripts import save_results as sr
 import matplotlib.pyplot as plt
@@ -324,11 +325,9 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
         if verbose and ((p + 1) % progress_every == 0 or (p + 1) == n_perm):
             mean_frame = float(np.mean(null_frame_curves[p]))
             mean_trial = float(np.mean(null_trial_curves[p]))
-            print(
-                f"  Permutation {p + 1}/{n_perm} "
+            print(f"  Permutation {p + 1}/{n_perm} "
                 f"| mean_frame_acc={mean_frame:.4f} "
-                f"| mean_trial_acc={mean_trial:.4f}"
-            )
+                f"| mean_trial_acc={mean_trial:.4f}")
 
     # Summary across permutations
     null_frame_mean = np.mean(null_frame_curves, axis=0)
@@ -363,85 +362,217 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
 
 
 
-
-
-
-def plot_sliding_window_permutation_trial_level(
-        perm_data,
-        chance=0.5,
-        title="Sliding-window permutation test (trial-level)",
-        figsize=(7, 4),
-        ylim=(0.4, 1.0),
-        show_null_curves=False,
-        null_alpha=0.08,
-        show_real_sem=True,     # ← added
-        real_alpha=0.25         # transparency for real SEM
-    ):
+def sig_vector_perm_mean_across_folds(real_fold_trial_acc: np.ndarray,       # (n_window, n_folds)
+                                    null_trial_folds: np.ndarray,     # (n_shuffle, n_window, n_folds)
+                                    alpha: float = 0.001,
+                                    two_sided: bool = True,
+                                    chance_level: float = 0.5) -> np.ndarray:
     """
-    Plot trial-level real curve vs permutation null (mean ± SEM).
-    Uses only saved values. No calculations performed here.
+    Window-wise significance using an empirical permutation test where the
+    statistic is MEAN accuracy across folds.
+
+    For each window w:
+    real_stat[w]  = mean(real_fold_trial_acc[w, :])                  -> 1 number
+    null_stat[s]  = mean(null_trial_folds[s, w, :]) for s=1..S  -> S numbers
+
+    If two_sided=True:
+    compares |stat - chance_level| between real and null.
+
+    Returns
+    -------
+    sig01 : np.ndarray, shape (n_window,), dtype=int
+        1 where p < alpha, else 0.
+    """
+    real = np.asarray(real_fold_trial_acc, dtype=float)
+    null = np.asarray(null_trial_folds, dtype=float)
+    if real.ndim != 2:
+        raise ValueError(f"real_fold_trial_acc must be (n_window, n_folds). Got {real.shape}")
+    if null.ndim != 3:
+        raise ValueError(f"null_trial_folds must be (n_shuffle, n_window, n_folds). Got {null.shape}")
+    n_window, n_folds = real.shape
+    n_shuffle, n_window2, n_folds2 = null.shape
+    if n_window2 != n_window or n_folds2 != n_folds:
+        raise ValueError(f"Shape mismatch: real={real.shape}, null={null.shape}")
+    # stats
+    real_stat = np.nanmean(real, axis=1)     # (n_window,)
+    null_stat = np.nanmean(null, axis=2)     # (n_shuffle, n_window)
+    # empirical p-values per window
+    if two_sided:
+        real_eff = np.abs(real_stat - chance_level)          # (n_window,)
+        null_eff = np.abs(null_stat - chance_level)          # (n_shuffle, n_window)
+        ge = (null_eff >= real_eff[None, :]).sum(axis=0)     # (n_window,)
+    else:
+        ge = (null_stat >= real_stat[None, :]).sum(axis=0)   # (n_window,)
+    # +1 correction avoids p=0 and matches standard permutation p-value
+    p = (ge + 1.0) / (n_shuffle + 1.0)                       # (n_window,)
+    sig01 = (p < alpha).astype(int)
+    return sig01
+
+
+
+
+
+def sig_vector_foldlevel_ranksum(fold_trial_acc: np.ndarray,        # (n_window, n_folds)
+                                null_trial_folds: np.ndarray,      # (n_shuffle, n_window, n_folds)
+                                alpha: float = 0.05,
+                                alternative: str = "two-sided"     # "two-sided", "greater", "less"
+                                ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    For each window:
+        real group  = fold_trial_acc[w, :]              (n_folds,)
+        null group  = null_trial_folds[:, w, :].ravel() (n_shuffle*n_folds,)
+
+    Performs Mann–Whitney U (rank-sum).
+    Returns
+    sig01 : (n_window,) int
+        1 where p < alpha, else 0.
+    pvals : (n_window,) float
+        Raw p-values per window.
     """
 
-    centers = np.asarray(perm_data["centers"])
-    real = perm_data["real_trial_curve"]
-    real_sem = perm_data.get("real_trial_sem")  # ← added
-    null_mean = perm_data["null_trial_mean"]
-    null_sem = perm_data["null_trial_sem"]
+    real = np.asarray(fold_trial_acc, dtype=float)
+    null = np.asarray(null_trial_folds, dtype=float)
 
-    if real is None:
-        raise ValueError("perm_data['real_trial_curve'] is missing.")
-    if null_mean is None or null_sem is None:
-        raise ValueError("perm_data must include 'null_trial_mean' and 'null_trial_sem'.")
+    if real.ndim != 2:
+        raise ValueError(f"fold_trial_acc must be (n_window, n_folds). Got {real.shape}")
+    if null.ndim != 3:
+        raise ValueError(f"null_trial_folds must be (n_shuffle, n_window, n_folds). Got {null.shape}")
 
-    real = np.asarray(real, dtype=float)
-    null_mean = np.asarray(null_mean, dtype=float)
-    null_sem = np.asarray(null_sem, dtype=float)
+    n_window, n_folds = real.shape
+    n_shuffle, n_window2, n_folds2 = null.shape
 
-    if real_sem is not None:
-        real_sem = np.asarray(real_sem, dtype=float)
+    if n_window2 != n_window or n_folds2 != n_folds:
+        raise ValueError(f"Shape mismatch: real={real.shape}, null={null.shape}")
 
-    plt.figure(figsize=figsize)
+    sig01 = np.zeros(n_window, dtype=int)
+    pvals = np.ones(n_window, dtype=float)
 
-    # Optional: plot all null curves
-    if show_null_curves and (perm_data.get("null_trial_acc") is not None):
-        null_curves = np.asarray(perm_data["null_trial_acc"], dtype=float)
-        for i in range(null_curves.shape[0]):
-            plt.plot(centers, null_curves[i], alpha=null_alpha, linewidth=1)
+    for w in range(n_window):
 
-    # Null mean ± SEM
-    plt.plot(centers, null_mean, linewidth=2, label="Null mean (permutations)")
-    plt.fill_between(
-        centers,
-        null_mean - null_sem,
-        null_mean + null_sem,
-        alpha=0.25,
-        label="Null ± SEM"
-    )
+        x = real[w, :]
+        y = null[:, w, :].reshape(-1)
 
-    # Real mean
-    plt.plot(centers, real, linewidth=2, label="Real (trial-level)")
+        # remove NaNs if present
+        x = x[np.isfinite(x)]
+        y = y[np.isfinite(y)]
 
-    # Real SEM (if available)
-    if show_real_sem and (real_sem is not None):
-        plt.fill_between(
-            centers,
-            real - real_sem,
-            real + real_sem,
-            alpha=real_alpha,
-            label="Real ± SEM"
-        )
+        if x.size == 0 or y.size == 0:
+            continue
 
-    # Chance
+        res = mannwhitneyu(x, y, alternative=alternative)
+        pvals[w] = res.pvalue
+        sig01[w] = int(res.pvalue < alpha)
+
+    return sig01, pvals
+
+
+
+
+
+
+def plot_sw_perm_simple(prem_results,
+                        frames,
+                        sig01=None,
+                        frame0=27,
+                        ms_per_frame=10.0,
+                        chance=0.5,
+                        title="Sliding-window permutation (trial + frame)",
+                        figsize=(7, 4),
+                        ylim=(0.4, 1.0),
+                        sig_mode="bar",
+                        sig_height=0.02):
+    """
+    Minimal plotting for sliding-window permutation results.
+
+    Expects in prem_results:
+      - real_fold_trial_acc : (n_folds, n_windows) OR (n_windows,)
+      - real_frame_curve    : (n_windows,)
+      - null_trial_folds    : (n_perm, n_windows) OR (n_perm, n_folds, n_windows)
+
+    Parameters
+    ----------
+    frames : array-like, (n_windows,)
+        Window-center frame indices (same length as curves).
+    sig01 : array-like bool/int, (n_windows,), optional
+        1/0 vector marking significant windows.
+    frame0 : int
+        Frame index that will be treated as time 0.
+    ms_per_frame : float
+        Convert frames to ms: time_ms = (frame - frame0) * ms_per_frame.
+        If you prefer "frames relative to 27", set ms_per_frame=1 and rename label as needed.
+    """
+
+    # --- extract ---
+    real_trial_acc = np.asarray(prem_results["real_trial_curve"], dtype=float)
+    real_frame_acc      = np.asarray(prem_results["real_frame_curve"], dtype=float).ravel()
+    null_trial_folds    = np.asarray(prem_results["null_trial_folds"], dtype=float)
+
+    frames = np.asarray(frames, dtype=float).ravel()
+
+    # --- make curves (simple, robust to shapes) ---
+    # real trial: mean across folds if needed
+    if real_trial_acc.ndim == 2:
+        real_trial = real_trial_acc.mean(axis=0)
+    else:
+        real_trial = real_trial_acc.ravel()
+
+    # null: if (perm, folds, win) -> average folds inside each perm
+    if null_trial_folds.ndim == 3:
+        null_perm_curves = null_trial_folds.mean(axis=2)         # (n_perm, n_win)
+    elif null_trial_folds.ndim == 2:
+        null_perm_curves = null_trial_folds                      # (n_perm, n_win)
+    else:
+        raise ValueError("null_trial_folds must be 2D or 3D.")
+
+    null_mean = null_perm_curves.mean(axis=0)
+    null_std  = null_perm_curves.std(axis=0, ddof=1)
+
+    n = real_trial.size
+    if frames.size != n or real_frame_acc.size != n or null_mean.size != n:
+        raise ValueError("frames/real_trial/real_frame/null must all have the same length.")
+    if sig01 is not None:
+        sig01 = np.asarray(sig01).astype(bool).ravel()
+        if sig01.size != n:
+            raise ValueError("sig01 must have the same length as curves.")
+
+    # --- time axis: frame0 -> 0 ---
+    time = (frames - float(frame0)) * float(ms_per_frame)
+
+    # --- plot ---
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.plot(time, null_mean, linewidth=2, label="Null mean (trial)")
+    ax.fill_between(time, null_mean - null_std, null_mean + null_std, alpha=0.25, label="Null ± Std")
+
+    ax.plot(time, real_trial, linewidth=2.5, label="Real (trial)")
+    ax.plot(time, real_frame_acc, linestyle="--", linewidth=2, label="Real (frame)")
+
     if chance is not None:
-        plt.axhline(float(chance), linestyle="--", linewidth=1, label=f"Chance={chance}")
-
-    plt.title(title)
-    plt.xlabel("Frame (window center)")
-    plt.ylabel("Accuracy")
+        ax.axhline(float(chance), linestyle="--", linewidth=1, label=f"Chance={chance}")
 
     if ylim is not None:
-        plt.ylim(*ylim)
+        ax.set_ylim(*ylim)
 
-    plt.legend()
-    plt.tight_layout()
+    # significance overlay
+    if sig01 is not None and sig01.any():
+        y0, y1 = ax.get_ylim()
+        yr = (y1 - y0) if (y1 > y0) else 1.0
+
+        if sig_mode == "bar":
+            bar_bottom = y0 + 0.02 * yr
+            bar_top    = bar_bottom + float(sig_height) * yr
+            ax.fill_between(time, bar_bottom, bar_top, where=sig01, step="mid", alpha=0.9)
+        elif sig_mode == "dots":
+            y_dot = y0 + (0.02 + float(sig_height)) * yr
+            ax.scatter(time[sig01], np.full(sig01.sum(), y_dot), s=18)
+        else:
+            raise ValueError("sig_mode must be 'bar' or 'dots'.")
+
+    ax.set_title(title)
+    ax.set_xlabel(f"Time (ms), 0 @ frame {frame0}" if ms_per_frame != 1 else f"Frames (0 @ frame {frame0})")
+    ax.set_ylabel("Accuracy")
+    ax.legend()
+    fig.tight_layout()
     plt.show()
+
+    return fig, ax

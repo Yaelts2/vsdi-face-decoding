@@ -151,9 +151,9 @@ def load_sliding_window_permutation(run_dir):
             null_trial_acc
             null_frame_acc
             null_trial_mean
-            null_trial_sem
+            null_trial_std
             null_frame_mean
-            null_frame_sem
+            null_frame_std
             config
     """
 
@@ -174,15 +174,17 @@ def load_sliding_window_permutation(run_dir):
     out = {"centers": data["centers"],
         # real curves
         "real_trial_curve": data.get("real_trial_curve"),
+        "real_fold_trial_acc" : data.get("real_fold_trial_acc"),
         "real_frame_curve": data.get("real_frame_curve"),
         # full null curves
         "null_trial_acc": data.get("null_trial_acc"),
+        "null_trial_folds": data.get("null_trial_folds"),
         "null_frame_acc": data.get("null_frame_acc"),
-        # null mean ± sem
+        # null mean ± std
         "null_trial_mean": data.get("null_trial_mean"),
-        "null_trial_sem": data.get("null_trial_sem"),
+        "null_trial_std": data.get("null_trial_std"),
         "null_frame_mean": data.get("null_frame_mean"),
-        "null_frame_sem": data.get("null_frame_sem"),
+        "null_frame_std": data.get("null_frame_std"),
         "config": config }
 
     return out

@@ -23,7 +23,7 @@ ourCmap = pre.green_gray_magenta()
 ### which model to load and plot results from
 
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "sliding_window__frame0-125__SVM_5foldCV__2026-02-24_17-34-36" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "sliding_window__frame0-100__SVM_5foldCV__2026-02-25_15-08-54" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 
@@ -48,12 +48,14 @@ print("X_ROI shape:", X_ROI.shape)
 
 W_img=ev.window_weights_to_pixel_time_matrix(results_sliding_window["w_mean_windows"], ROI_mask, pixels=100)
 print(W_img.shape) #(pixels, frames) where frames correspond to window centers
+'''
 pl.mimg(W_img, xsize=100, ysize=100, low=-0.0002, high=0.0002, frames=results_sliding_window["centers"])
-frame_ids = np.arange(0, 43)         
-weights=W_img[:,0:43]
-X_avg, labels_ms, bin_frames = pl.avg_consecutive_frames_with_ms_labels(X=weights, frame_ids=frame_ids, avg_n=2, dt_ms=10, zero_frame=27
+frame_ids = np.arange(0, 120)         
+weights=W_img
+X_avg, labels_ms, bin_frames = pl.avg_consecutive_frames_with_ms_labels(X=weights, frame_ids=frame_ids, avg_n=3, dt_ms=10, zero_frame=27
 )
-fig,axes_flat =pl.mimg(X_avg, xsize=100, ysize=100, low=-0.002, high=0.002,frames=labels_ms.astype(int), width=14,colormap=ourCmap)
+'''
+fig,axes_flat =pl.mimg(W_img, xsize=100, ysize=100, low=-0.001, high=0.001)
 plt.show()
 
 
