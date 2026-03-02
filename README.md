@@ -1,112 +1,162 @@
 # VSDI Face Decoding
 
-Python pipeline for VSDI face vs non-face decoding from MATLAB condition files.
-
-## What This Project Does
-
-This repository provides an end-to-end workflow for:
-- converting raw `.mat` condition files to `.npy`
-- frame-zero and blank-condition normalization
-- dataset assembly (`X`, `y`) for face/non-face classification
-- ROI-based feature extraction
-- linear SVM decoding with grouped cross-validation
-- sliding-window decoding over time
-- visualization of accuracy, ROC/confusion, and weight maps
+Pipeline for decoding face vs non-face VSDI activity using fixed-window and sliding-window linear SVM analyses, with permutation testing and post-hoc visualization.
 
 ## Project Structure
 
 ```text
-scripts/
-  main.py                         # main decoding workflow (dataset -> ROI -> sliding window)
-  optinal_preprocrssing.py        # optional preprocessing pipeline from raw .mat
-  functions_scripts/
-    preprocessing_functions.py     # split/normalize/build X,y/z-score
-    feature_extraction.py          # ROI creation, window extraction, reshaping
-    ml_cv.py                       # CV utilities + nested CV
-    sliding_win.py                 # sliding-window decoding + plot
-    ml_evaluation.py               # weight-map analysis utilities
-    ml_plots.py                    # plotting helpers
-    movie_function.py              # interactive weight-map movie
+vsdi-face-decoding/
+  data/
+    raw_mat/                       # original MATLAB files (conds_*.mat)
+    processed/                     # processed .npy files + ROI masks
+  figures/                         # exported plots
+  results/                         # saved run folders (config + result files)
+  scripts/
+    optional_preprocessing.py      # optional raw .mat -> normalized .npy + ROI workflow
 
-data/
-  raw_mat/                         # input .mat files (not versioned)
-  processed/                       # generated .npy outputs (not versioned)
+    run_experiment/
+      run_fixed_window.py          # fixed temporal window decoding + nested CV
+      run_sliding_window.py        # sliding-window decoding across time
+      run_permutation_test.py      # permutation test for a fixed-window saved run
+      run_permutation_test_slidingwin   # permutation test for a sliding-window saved run
 
-figures/                           # saved figures
-requirements.txt
+    open_fixed_win_model.py        # inspect/plot fixed-window saved run
+    open_sliding_win_model.py      # inspect/plot sliding-window saved run
+    open_permutation_fixed_win.py  # inspect/plot fixed-window permutation results
+    open_permutation_sliding.py    # inspect/plot sliding-window permutation results
+
+    functions_scripts/
+      preprocessing_functions.py   # data loading + normalization helpers
+      feature_extraction.py        # ROI/window/frame feature builders
+      ml_cv.py                     # SVM + CV/nested CV
+      sliding_win.py               # sliding-window training/evaluation
+      model_control.py             # permutation/statistics utilities
+      ml_evaluation.py             # weight/activation analyses
+      ml_plots.py                  # plotting helpers
+      movie_function.py            # weight movie visualization
+      save_results.py              # save/load run artifacts
+
+  README.md
+  requirements.txt
 ```
 
-## Requirements
-
-Install dependencies:
+## Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Expected Data Format
+## Data Expectations
 
-Input `.mat` files should contain keys like `cond1`, `cond2`, ...
+Input data is expected as `.npy` condition arrays (typically generated from `.mat` files), with internal shape conventions used across the code:
+- trial-level arrays: `(pixels, frames, trials)`
+- labels: `(trials,)`
+- frame-as-sample arrays (for model fitting): `(samples, features)`
 
-Expected array shape through the pipeline:
-- condition arrays: `(pixels, frames, trials)`
-- decoded dataset: `X` as `(pixels, frames, trials)`, `y` as `(trials,)`
+Most scripts assume 100x100 maps (`pixels = 10000`) and a saved ROI mask in `data/processed/`.
 
-The current code assumes 100x100 spatial maps (`pixels = 10000`).
-
-## Quick Start
+## Main Workflows
 
 ### 1) Optional preprocessing from raw MATLAB files
 
-Run:
-
 ```bash
-python scripts/optinal_preprocrssing.py
+python scripts/optional_preprocessing.py
 ```
 
-This script is set up for:
-1. split condition files
-2. frame-zero normalization
-3. blank normalization
-4. ROI mask creation/saving
+Use this script to:
+- split raw condition files
+- apply frame-zero normalization
+- apply blank-condition normalization
+- create/save an ROI mask
 
-Note: parts of this script are currently commented out. Uncomment the preprocessing calls to generate outputs.
+Note: several preprocessing calls are currently commented in the script; enable the sections you want to run.
 
-### 2) Main decoding analysis
-
-Run:
+### 2) Train a fixed-window model
 
 ```bash
-python scripts/main.py
+python -m scripts.run_experiment.run_fixed_window
 ```
 
-Current flow in `scripts/main.py`:
-1. load processed face/non-face conditions with `build_X_y`
-2. z-score data (`zscore_dataset_pixelwise_trials`)
-3. load ROI mask (`data/processed/ROI_onlyV24_mask.npy`)
-4. extract ROI + temporal window features
-5. run sliding-window decoding (`sliding_window_decode_with_stats`)
-6. plot accuracy curves and weight maps
-7. show interactive weight movie
+What it does:
+- builds `X_trials, y_trials`
+- z-scores by baseline frames
+- applies ROI mask and selected temporal window
+- converts to frames-as-samples
+- runs nested CV (`GroupKFold`) to select/evaluate `C`
+- saves run under `results/fixed_window__...`
 
-## Important Notes
+### 3) Train a sliding-window model
 
-- `scripts/main.py` and `scripts/optinal_preprocrssing.py` contain absolute Windows paths (for example `C:\project\vsdi-face-decoding\...`).
-- If you run in a different location, update these paths to relative paths or your local absolute paths.
-- Raw and processed data are intentionally excluded from version control.
+```bash
+python -m scripts.run_experiment.run_sliding_window
+```
 
-## Outputs
+What it does:
+- same preprocessing/ROI setup
+- decodes across moving windows
+- stores frame-level and trial-level accuracy curves
+- saves run under `results/sliding_window__...`
 
-Depending on what you run, outputs include:
-- normalized `.npy` condition files under `data/processed/`
-- ROI mask file (`ROI_mask.npy`)
-- diagnostic figures (accuracy bars, confusion matrix, ROC, spatial weights, permutation/activation plots)
-- interactive movie of windowed weight maps
+### 4) Run permutation tests
+
+Fixed-window permutation test:
+
+```bash
+python -m scripts.run_experiment.run_permutation_test
+```
+
+Sliding-window permutation test:
+
+```bash
+python scripts/run_experiment/run_permutation_test_slidingwin
+```
+
+Both scripts load an existing saved run from `results/`, rebuild matching features, run label-shuffle tests, and save outputs under:
+- `results/permutation_test/`
+- `results/permutation_test_sliding_window/`
+
+### 5) Open and visualize saved runs
+
+```bash
+python scripts/open_fixed_win_model.py
+python scripts/open_sliding_win_model.py
+python scripts/open_permutation_fixed_win.py
+python scripts/open_permutation_sliding.py
+```
+
+These scripts load saved outputs and generate figures such as:
+- fold-wise accuracy summaries
+- confusion matrices / ROC
+- weight maps and positive/negative mask activations
+- sliding-window accuracy curves
+- permutation null vs real-performance plots
+
+## Important Configuration Notes
+
+Most run/open scripts contain user-editable config blocks at the top (file names, ROI path, windows, CV setup, run directory to load).
+
+Several scripts currently include absolute Windows paths like:
+- `C:\project\vsdi-face-decoding\results`
+- `C:\project\vsdi-face-decoding\data\...`
+
+If your project is in a different location, update these paths before running.
+
+## Output Format
+
+A typical saved run directory contains:
+- `config.json` - run configuration and dataset metadata
+- `result.npz` - model outputs/metrics
+- `ROI_mask_path.npz` - reference to ROI mask used
+
+Permutation run directories contain:
+- `config.json`
+- `perm_result.npz`
 
 ## Reproducibility
 
-For stable runs, keep:
-- same trial splits (group definitions)
-- same ROI mask
-- same preprocessing settings (zero frames, blank condition)
-- fixed model hyperparameters (`C`, `n_splits`, window size/range)
+For consistent results across runs, keep fixed:
+- input condition files
+- preprocessing settings (baseline/blank/normalization)
+- ROI mask
+- CV definitions (`GroupKFold` splits)
+- model hyperparameters (`C`, window definitions, seeds)
