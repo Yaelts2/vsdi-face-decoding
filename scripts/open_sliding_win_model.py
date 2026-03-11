@@ -48,14 +48,14 @@ print("X_ROI shape:", X_ROI.shape)
 
 W_img=ev.window_weights_to_pixel_time_matrix(results_sliding_window["w_mean_windows"], ROI_mask, pixels=100)
 print(W_img.shape) #(pixels, frames) where frames correspond to window centers
-'''
-pl.mimg(W_img, xsize=100, ysize=100, low=-0.0002, high=0.0002, frames=results_sliding_window["centers"])
-frame_ids = np.arange(0, 120)         
+
+pl.mimg(W_img, xsize=100, ysize=100, low=-0.0002, high=0.0002, frames=results_sliding_window["centers"], colormap=ourCmap)
+frame_ids = np.arange(0, W_img.shape[1]) 
 weights=W_img
 X_avg, labels_ms, bin_frames = pl.avg_consecutive_frames_with_ms_labels(X=weights, frame_ids=frame_ids, avg_n=3, dt_ms=10, zero_frame=27
 )
-'''
-fig,axes_flat =pl.mimg(W_img, xsize=100, ysize=100, low=-0.001, high=0.001)
+
+fig,axes_flat =pl.mimg(X_avg, xsize=100, ysize=100, low=-0.001, high=0.001, colormap=ourCmap, frames=labels_ms+10)
 plt.show()
 
 

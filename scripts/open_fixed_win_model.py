@@ -45,7 +45,7 @@ nested = cv.run_nested_cv_selectC_then_eval(
 
 ### which model to load and plot results from
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "fixed_window__frame47-55__SVM_10fold__2026-03-02_14-55-16" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "fixed_window__frame32-40__SVM_10fold__2026-02-24_15-48-01" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 
@@ -82,11 +82,11 @@ pl.plot_confusion_matrix(results=results_fixed_window,class_names=("Non-face", "
                         title="Frame-level confusion matrix",
                         figsize=(5.6, 4.9),
                         show_counts=True,
-                        colormap='Greys')
+                        colormap='Purples',)
 pl.plot_confusion_matrix(y_true=results_fixed_window["oof_y_true_trial"],
                         y_pred=results_fixed_window["oof_pred_trial"],
                         title="Trial-level confusion matrix",
-                        colormap='Grays')
+                        colormap='Blues',)
 
 # 3) ROC from outer OOF scores (only where score exists)
 try:

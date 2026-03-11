@@ -267,17 +267,17 @@ def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0,co
     return fig, axes_flat
 
 #example usage
-'''
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
+
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_110209a.npy")
 x_avg = x.mean(axis=2)
 x_avg_frames =  x_avg[:, 25:81]
 frame_ids = np.arange(25, 81)          # 25..80 (56 frames)
 X_avg, labels_ms, bin_frames = avg_consecutive_frames_with_ms_labels(
     X=x_avg_frames, frame_ids=frame_ids, avg_n=2, dt_ms=10, zero_frame=27
 )
-fig,axes_flat =mimg(X_avg-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=labels_ms.astype(int), width=14)
+fig,axes_flat =mimg(X_avg-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=labels_ms.astype(int), width=17)
 plt.show()
-'''
+
 
 
 
@@ -553,15 +553,15 @@ def plot_confusion_matrix(y_true=None,
     plt.figure(figsize=figsize)
     im = plt.imshow(cm, vmin=0, vmax=1, cmap=colormap)
     cbar = plt.colorbar(im)
-    cbar.ax.tick_params(labelsize=11)
+    cbar.ax.tick_params(labelsize=16)
     cbar.set_label("Proportion", fontsize=12)
 
     n = len(class_names)
     plt.xticks(np.arange(n), class_names, fontsize=15)
     plt.yticks(np.arange(n), class_names, fontsize=15)
-    plt.xlabel("Predicted label", fontsize=14)
-    plt.ylabel("True label", fontsize=14)
-    plt.title(title, fontsize=16, fontweight="bold")
+    plt.xlabel("Predicted label", fontsize=18)
+    plt.ylabel("True label", fontsize=18)
+    plt.title(title, fontsize=18, fontweight="bold")
 
     for i in range(n):
         for j in range(n):
@@ -571,7 +571,7 @@ def plot_confusion_matrix(y_true=None,
                 txt += f"\n(n={cm_counts[i, j]})"
             plt.text(j, i, txt,
                     ha="center", va="center",
-                    fontsize=15, fontweight="bold",
+                    fontsize=16, fontweight="bold",
                     color="white" if val >= 0.5 else "black"            )
 
     plt.tight_layout()

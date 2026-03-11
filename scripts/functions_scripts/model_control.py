@@ -7,6 +7,9 @@ from sklearn.model_selection import GroupKFold
 from sklearn.metrics import accuracy_score
 from scripts.functions_scripts import feature_extraction as fe
 from scripts.functions_scripts import sliding_win as sw
+import warnings
+import numpy as np
+from statsmodels.stats.multitest import multipletests
 
 import numpy as np
 
@@ -362,74 +365,70 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
 
 
 
-def sig_vector_perm_mean_across_folds(real_fold_trial_acc: np.ndarray,       # (n_window, n_folds)
-                                    null_trial_folds: np.ndarray,     # (n_shuffle, n_window, n_folds)
-                                    alpha: float = 0.001,
-                                    two_sided: bool = True,
-                                    chance_level: float = 0.5) -> np.ndarray:
+
+
+def sig_vector_perm_mean_across_folds(
+    real_fold_trial_acc: np.ndarray,   # (n_window, n_folds)
+    null_trial_folds: np.ndarray,      # (n_shuffle, n_window, n_folds)
+    alpha: float = 0.001,
+    two_sided: bool = True,
+    chance_level: float = 0.5,
+    fdr_correction: bool = True
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Window-wise significance using an empirical permutation test where the
-    statistic is MEAN accuracy across folds.
-
-    For each window w:
-    real_stat[w]  = mean(real_fold_trial_acc[w, :])                  -> 1 number
-    null_stat[s]  = mean(null_trial_folds[s, w, :]) for s=1..S  -> S numbers
-
-    If two_sided=True:
-    compares |stat - chance_level| between real and null.
-
     Returns
     -------
-    sig01 : np.ndarray, shape (n_window,), dtype=int
-        1 where p < alpha, else 0.
+    sig01     : (n_window,) int   — 1 where significant
+    p_raw     : (n_window,) float — uncorrected p-values
+    p_correct : (n_window,) float — FDR-corrected p-values (or same as p_raw if fdr_correction=False)
     """
     real = np.asarray(real_fold_trial_acc, dtype=float)
     null = np.asarray(null_trial_folds, dtype=float)
+
     if real.ndim != 2:
-        raise ValueError(f"real_fold_trial_acc must be (n_window, n_folds). Got {real.shape}")
+        raise ValueError(f"real must be (n_window, n_folds), got {real.shape}")
     if null.ndim != 3:
-        raise ValueError(f"null_trial_folds must be (n_shuffle, n_window, n_folds). Got {null.shape}")
+        raise ValueError(f"null must be (n_shuffle, n_window, n_folds), got {null.shape}")
+
     n_window, n_folds = real.shape
     n_shuffle, n_window2, n_folds2 = null.shape
+
     if n_window2 != n_window or n_folds2 != n_folds:
         raise ValueError(f"Shape mismatch: real={real.shape}, null={null.shape}")
-    # stats
-    real_stat = np.nanmean(real, axis=1)     # (n_window,)
-    null_stat = np.nanmean(null, axis=2)     # (n_shuffle, n_window)
-    # empirical p-values per window
+
+    if np.any(np.isnan(real)) or np.any(np.isnan(null)):
+        warnings.warn("NaNs detected — nanmean is used, affected windows may be unreliable.")
+
+    # compute statistics
+    real_stat = np.nanmean(real, axis=1)       # (n_window,)
+    null_stat = np.nanmean(null, axis=2)       # (n_shuffle, n_window)
+
     if two_sided:
-        real_eff = np.abs(real_stat - chance_level)          # (n_window,)
-        null_eff = np.abs(null_stat - chance_level)          # (n_shuffle, n_window)
-        ge = (null_eff >= real_eff[None, :]).sum(axis=0)     # (n_window,)
+        real_eff = np.abs(real_stat - chance_level)
+        null_eff = np.abs(null_stat - chance_level)
+        ge = (null_eff >= real_eff[None, :]).sum(axis=0)
     else:
-        ge = (null_stat >= real_stat[None, :]).sum(axis=0)   # (n_window,)
-    # +1 correction avoids p=0 and matches standard permutation p-value
-    p = (ge + 1.0) / (n_shuffle + 1.0)                       # (n_window,)
-    sig01 = (p < alpha).astype(int)
-    return sig01
+        ge = (null_stat >= real_stat[None, :]).sum(axis=0)
+
+    p_raw = (ge + 1.0) / (n_shuffle + 1.0)    # (n_window,)
+
+    if fdr_correction:
+        _, p_correct, _, _ = multipletests(p_raw, alpha=alpha, method='fdr_bh')
+    else:
+        p_correct = p_raw
+
+    sig01 = (p_correct < alpha).astype(int)
+
+    return sig01, p_raw, p_correct
 
 
 
-
-
-def sig_vector_foldlevel_ranksum(fold_trial_acc: np.ndarray,        # (n_window, n_folds)
-                                null_trial_folds: np.ndarray,      # (n_shuffle, n_window, n_folds)
+def sig_vector_foldlevel_ranksum(fold_trial_acc: np.ndarray,      # (n_window, n_folds)
+                                null_trial_folds: np.ndarray,    # (n_shuffle, n_window, n_folds)
                                 alpha: float = 0.05,
-                                alternative: str = "two-sided"     # "two-sided", "greater", "less"
-                                ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    For each window:
-        real group  = fold_trial_acc[w, :]              (n_folds,)
-        null group  = null_trial_folds[:, w, :].ravel() (n_shuffle*n_folds,)
-
-    Performs Mann–Whitney U (rank-sum).
-    Returns
-    sig01 : (n_window,) int
-        1 where p < alpha, else 0.
-    pvals : (n_window,) float
-        Raw p-values per window.
-    """
-
+                                alternative: str = "greater",    # "two-sided", "greater", "less"
+                                fdr_correction: bool = True
+                                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     real = np.asarray(fold_trial_acc, dtype=float)
     null = np.asarray(null_trial_folds, dtype=float)
 
@@ -444,15 +443,12 @@ def sig_vector_foldlevel_ranksum(fold_trial_acc: np.ndarray,        # (n_window,
     if n_window2 != n_window or n_folds2 != n_folds:
         raise ValueError(f"Shape mismatch: real={real.shape}, null={null.shape}")
 
-    sig01 = np.zeros(n_window, dtype=int)
     pvals = np.ones(n_window, dtype=float)
 
     for w in range(n_window):
-
         x = real[w, :]
-        y = null[:, w, :].reshape(-1)
+        y = null[:, w, :].ravel()
 
-        # remove NaNs if present
         x = x[np.isfinite(x)]
         y = y[np.isfinite(y)]
 
@@ -461,10 +457,15 @@ def sig_vector_foldlevel_ranksum(fold_trial_acc: np.ndarray,        # (n_window,
 
         res = mannwhitneyu(x, y, alternative=alternative)
         pvals[w] = res.pvalue
-        sig01[w] = int(res.pvalue < alpha)
 
-    return sig01, pvals
+    if fdr_correction:
+        _, p_correct, _, _ = multipletests(pvals, alpha=alpha, method='fdr_bh')
+    else:
+        p_correct = pvals
 
+    sig01 = (p_correct < alpha).astype(int)
+
+    return sig01, pvals, p_correct
 
 
 
@@ -485,12 +486,11 @@ def plot_sw_perm_simple(prem_results,
     Minimal plotting for sliding-window permutation results.
 
     Expects in prem_results:
-      - real_fold_trial_acc : (n_folds, n_windows) OR (n_windows,)
-      - real_frame_curve    : (n_windows,)
-      - null_trial_folds    : (n_perm, n_windows) OR (n_perm, n_folds, n_windows)
+    - real_fold_trial_acc : (n_folds, n_windows) OR (n_windows,)
+    - real_frame_curve    : (n_windows,)
+    - null_trial_folds    : (n_perm, n_windows) OR (n_perm, n_folds, n_windows)
 
     Parameters
-    ----------
     frames : array-like, (n_windows,)
         Window-center frame indices (same length as curves).
     sig01 : array-like bool/int, (n_windows,), optional
@@ -504,13 +504,16 @@ def plot_sw_perm_simple(prem_results,
 
     # --- extract ---
     real_trial_acc = np.asarray(prem_results["real_trial_curve"], dtype=float)
-    real_frame_acc      = np.asarray(prem_results["real_frame_curve"], dtype=float).ravel()
-    null_trial_folds    = np.asarray(prem_results["null_trial_folds"], dtype=float)
+    real_trial_acc=real_trial_acc[0:45]  
+
+    real_frame_acc = np.asarray(prem_results["real_frame_curve"], dtype=float).ravel()
+    real_frame_acc=real_frame_acc[0:45]    
+    null_trial_folds = np.asarray(prem_results["null_trial_folds"], dtype=float)
+    null_trial_folds=null_trial_folds[:,0:45,:]
 
     frames = np.asarray(frames, dtype=float).ravel()
 
-    # --- make curves (simple, robust to shapes) ---
-    # real trial: mean across folds if needed
+    # real trial: mean across folds
     if real_trial_acc.ndim == 2:
         real_trial = real_trial_acc.mean(axis=0)
     else:
@@ -535,17 +538,17 @@ def plot_sw_perm_simple(prem_results,
         if sig01.size != n:
             raise ValueError("sig01 must have the same length as curves.")
 
-    # --- time axis: frame0 -> 0 ---
+    #time axis
     time = (frames - float(frame0)) * float(ms_per_frame)
 
-    # --- plot ---
+    # plot
     fig, ax = plt.subplots(figsize=figsize)
 
     ax.plot(time, null_mean, linewidth=2, label="Null mean (trial)")
-    ax.fill_between(time, null_mean - null_std, null_mean + null_std, alpha=0.25, label="Null ± Std")
+    ax.fill_between(time, null_mean - 3*null_std, null_mean + 3*null_std, alpha=0.25, label="Null ± Std")
 
-    ax.plot(time, real_trial, linewidth=2.5, label="Real (trial)")
-    ax.plot(time, real_frame_acc, linestyle="--", linewidth=2, label="Real (frame)")
+    ax.plot(time, real_trial, linewidth=2.5, label="Real (trial)",color="blue")
+    ax.plot(time, real_frame_acc, linestyle="--", linewidth=2, label="Real (frame)",color="purple")
 
     if chance is not None:
         ax.axhline(float(chance), linestyle="--", linewidth=1, label=f"Chance={chance}")
@@ -574,5 +577,4 @@ def plot_sw_perm_simple(prem_results,
     ax.legend()
     fig.tight_layout()
     plt.show()
-
     return fig, ax
