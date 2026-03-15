@@ -59,7 +59,7 @@ Most scripts assume 100x100 maps (`pixels = 10000`) and a saved ROI mask in `dat
 This project generates several types of outputs, including fixed-window classifications, sliding-window decodings, and their respective permutation tests.
 
 Dataset 1 (030209a)
-Fixed Window (Frames 32-40): fixed_window__frame32-40__SVM_10fold__2026-03-02_14-06-30
+Fixed Window (Frames 32-40): '''fixed_window__frame32-40__SVM_10fold__2026-03-02_14-06-30'''
 
 Dataset 2 (110209a)
 Early Fixed Window (Frames 32-40): fixed_window__frame32-40__SVM_10fold__2026-02-24_15-48-01
