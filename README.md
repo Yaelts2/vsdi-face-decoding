@@ -55,6 +55,32 @@ Input data is expected as `.npy` condition arrays (typically generated from `.ma
 
 Most scripts assume 100x100 maps (`pixels = 10000`) and a saved ROI mask in `data/processed/`.
 
+## Saved Models and Results
+This project generates several types of outputs, including fixed-window classifications, sliding-window decodings, and their respective permutation tests.
+
+Dataset 1 (030209a)
+Fixed Window (Frames 32-40): fixed_window__frame32-40__SVM_10fold__2026-03-02_14-06-30
+
+Dataset 2 (110209a)
+Early Fixed Window (Frames 32-40): fixed_window__frame32-40__SVM_10fold__2026-02-24_15-48-01
+
+Late Fixed Window (Frames 47-55): fixed_window__frame47-55__SVM_10fold__2026-03-02_14-55-16
+
+Permutation (Early Window): fixed_window__frame32-40__SVM_10fold__2026-02-18_17-43-53__permutation__perm100__seed42__2026-02-20_01-59-40
+
+Sliding Window (Frames 0-100): sliding_window__frame0-100__SVM_5foldCV__2026-02-25_15-08-54
+
+Permutation (Sliding Window): slidingwindow__perm1000__seed42__2026-02-26_17-34-13
+
+[!IMPORTANT]
+How to Load Results:
+To analyze or plot one of these runs, copy the specific folder name above and paste it into the RUN_DIR variable in the appropriate script:
+For fixed-window models: Use open_fixed_win_model.py.
+For sliding-window decodings: Use open_sliding_win_model.py.
+For permutation tests: Use open_permutation_results.py.
+
+
+
 ## Main Workflows
 
 ### 1) Optional preprocessing from raw MATLAB files
