@@ -107,16 +107,15 @@ perm_result = mc.run_permutation_nested_cv(X_frames, y_trials, groups,
                                         verbose=True)
 
 # 4) Compute significance vs the REAL run results you loaded (TRIAL level)
-# NOTE: trial-level significance is defined for metric="acc"
-stats_trial = mc.permutation_significance_test(real_nested,perm_result)
+real_acc = float(real_nested["outer_acc_trial_mean"])
+shuffled_accs = perm_result["shuffled_scores_trials"]
+
+stats_trial = mc.permutation_significance_test_fixed(real_acc, shuffled_accs, one_tailed=True)
 
 print("\n=== Permutation significance (TRIAL level) ===")
-print(f"Real trial acc: {stats_trial['real_score']:.4f}")
-print(f"Shuffled mean ± std: {stats_trial['shuffled_mean']:.4f} ± {stats_trial['shuffled_std']:.4f}")
-print(f"Shuffled range: [{stats_trial['shuffled_min']:.4f}, {stats_trial['shuffled_max']:.4f}]")
-print(f"P-value (two-tailed): {stats_trial['p_value_two_tailed']:.4f}")
-print("PASS (alpha=0.05):", stats_trial["pass_alpha_0p05"])
-print()
+print(f"Real trial acc: {real_acc:.4f}")
+print(f"P-value (one-tailed): {stats_trial['p_value']:.4f}")
+print("PASS (alpha=0.05):", stats_trial["pass"])
 
 # 5) Save permutation run outputs 
 PERM_ROOT.mkdir(parents=True, exist_ok=True)

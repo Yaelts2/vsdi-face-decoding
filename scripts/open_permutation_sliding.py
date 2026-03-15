@@ -23,7 +23,7 @@ centers=prem_results["centers"]
 real_fold_trial_acc=prem_results["real_fold_trial_acc"]
 real_frame_acc=prem_results["real_frame_curve"]
 null_trial_folds=prem_results["null_trial_folds"]
-sig01,p_raw,p_corr = mc.sig_vector_foldlevel_ranksum(real_fold_trial_acc, null_trial_folds, alpha=0.05)
+sig01,p_raw,p_corr = mc.sig_vector_perm_mean_across_folds(real_fold_trial_acc, null_trial_folds, alpha=0.05)
 sig01=sig01[0:45]
 p_raw=p_raw[0:45]
 frames = prem_results["centers"]+1

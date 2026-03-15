@@ -118,80 +118,27 @@ def run_permutation_nested_cv(X,y_trial,
 
 
 
-def permutation_significance_test(real_result,perm_result,
-                                metric="acc",
-                                level="trial",            # "trial" or "frame"
-                                chance_level=0.5):
-    """
-    Permutation significance test using distance-from-chance, at TRIAL or FRAME level.
+def permutation_significance_test_fixed(real_score, shuffled_scores, chance_level=0.5, one_tailed=True):
+    shuffled_scores = np.asarray(shuffled_scores)
+    n_shuffle = len(shuffled_scores)
+    
+    if not one_tailed:
+        # Two-tailed: extreme distance in either direction [cite: 20]
+        real_dist = np.abs(real_score - chance_level)
+        shuffled_dist = np.abs(shuffled_scores - chance_level)
+        hits = np.sum(shuffled_dist >= real_dist)
+    else:
+        # One-tailed: strictly "is real better than null?" [cite: 56]
+        hits = np.sum(shuffled_scores >= real_score)
 
-    Parameters
-    ----------
-    real_result : dict
-        Output of run_nested_cv_selectC_then_eval on REAL labels.
-        Must contain:
-        - frame acc:  outer_acc_mean
-        - trial acc:  outer_acc_trial_mean
-        - frame auc:  outer_auc_mean
-    perm_result : dict
-        Output of run_permutation_nested_cv 
-        Must contain:
-        - shuffled_scores_frames
-        - shuffled_scores_trials
-    metric : {"acc","auc"}
-    level : {"trial","frame"}
-        Which level to compute significance for.
-        - "trial": uses outer_acc_trial_mean and shuffled_scores_trials (recommended for your need)
-        - "frame": uses outer_acc_mean/outer_auc_mean and shuffled_scores_frames
-    chance_level : float
-
-    Returns
-    stats : dict
-        Summary + two-tailed p-value.
-    """
-    if metric not in ("acc", "auc"):
-        raise ValueError("metric must be 'acc' or 'auc'.")
-    if level not in ("trial", "frame"):
-        raise ValueError("level must be 'trial' or 'frame'.")
-
-    # --- choose keys based on requested level ---
-    if level == "trial":
-        if metric != "acc":
-            raise ValueError("Trial-level significance is supported for metric='acc' only (no trial-level AUC saved).")
-
-        real_key = "outer_acc_trial_mean"
-        perm_key = "shuffled_scores_trials"
-
-    else:  # level == "frame"
-        real_key = "outer_acc_mean" if metric == "acc" else "outer_auc_mean"
-        perm_key = "shuffled_scores_frames"
-
-    if real_key not in real_result:
-        raise KeyError(f"real_result missing key '{real_key}'. Available keys: {list(real_result.keys())}")
-    if perm_key not in perm_result:
-        raise KeyError(f"perm_result missing key '{perm_key}'. Available keys: {list(perm_result.keys())}")
-
-    real_score = float(real_result[real_key])
-
-    shuffled_scores = np.asarray(perm_result[perm_key], dtype=float)
-    if shuffled_scores.ndim != 1 or shuffled_scores.size == 0:
-        raise ValueError(f"perm_result['{perm_key}'] must be a non-empty 1D array.")
-
-    # two-tailed: compare distance-from-chance
-    p_value = float(np.mean(np.abs(shuffled_scores - chance_level) >= np.abs(real_score - chance_level)))
-
+    # Apply the (hits + 1) / (N + 1) formula from your PPT 
+    p_value = (hits + 1.0) / (n_shuffle + 1.0)
+    
     return {
-        "metric": metric,
-        "level": level,
-        "chance_level": float(chance_level),
-        "real_score": real_score,
-        "shuffled_scores": shuffled_scores,
-        "shuffled_mean": float(np.mean(shuffled_scores)),
-        "shuffled_std": float(np.std(shuffled_scores, ddof=1)) if shuffled_scores.size > 1 else float("nan"),
-        "shuffled_min": float(np.min(shuffled_scores)),
-        "shuffled_max": float(np.max(shuffled_scores)),
-        "p_value_two_tailed": p_value,
-        "pass_alpha_0p05": bool(p_value < 0.05),
+        "p_value": p_value,
+        "pass": p_value < 0.05,
+        "shuffled_mean": np.mean(shuffled_scores),
+        "shuffled_std": np.std(shuffled_scores, ddof=1)
     }
 
 
@@ -200,48 +147,58 @@ def permutation_significance_test(real_result,perm_result,
 
 def plot_permutation_test_trial(perm_data, bins=30, figsize=(7, 4), title=None):
     """
-    Plot TRIAL-level permutation test results (compatible with your load_permutation_run output).
+    Fixed plotting function to display p-values correctly using the new logic.
     """
     shuffled = np.asarray(perm_data["shuffled_scores_trials"], dtype=float).ravel()
     real = float(perm_data["real_trial_acc"])
+    n_perm = len(shuffled)
 
     sh_mean = float(perm_data["shuffled_trial_mean"])
     sh_std  = float(perm_data["shuffled_trial_std"])
     sh_min  = float(perm_data["shuffled_trial_min"])
     sh_max  = float(perm_data["shuffled_trial_max"])
 
-    p = float(perm_data["p_value_trial_two_tailed"])
-    pass05 = bool(perm_data["pass_alpha_0p05_trial"])
+    # Update: Use the generic 'p_value_trial' key from your new stats dict
+    p = float(perm_data.get("p_value_trial_two_tailed", perm_data.get("p_value_trial", 1.0)))
+    pass05 = p < 0.05
+
+    # Logic for "p <" display
+    # The smallest possible p-value with (hits+1)/(N+1) is 1/(N+1)
+    min_p = 1.0 / (n_perm + 1.0)
+    p_text = f"p < {min_p:.4g}" if p <= min_p else f"p = {p:.4f}"
 
     if title is None:
         title = "Permutation Test (Trial-Level Accuracy)"
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.hist(shuffled, bins=bins)
-    ax.axvline(real)
-    ax.axvline(sh_mean, linestyle="--")
-    ax.axvline(sh_mean - sh_std, linestyle=":")
-    ax.axvline(sh_mean + sh_std, linestyle=":")
+    
+    # Visual improvements
+    ax.hist(shuffled, bins=bins, color='lightgray', edgecolor='white', label='Null Distribution')
+    ax.axvline(real, color='red', linewidth=2, label='Real Result')
+    ax.axvline(sh_mean, color='blue', linestyle="--", label='Null Mean')
+    ax.axvline(sh_mean - sh_std, color='blue', linestyle=":", alpha=0.5)
+    ax.axvline(sh_mean + sh_std, color='blue', linestyle=":", alpha=0.5)
 
     ax.set_title(title)
     ax.set_xlabel("Trial-level accuracy")
     ax.set_ylabel("Count")
+    ax.legend(loc='upper right', fontsize='small')
 
+    # The text box showing the requested 'p <' or 'p =' format
     ax.text(
-        0.02, 0.98,
-        f"real = {real:.4f}\n"
-        f"mean±std = {sh_mean:.4f} ± {sh_std:.4f}\n"
-        f"range = {sh_min:.4f} / {sh_max:.4f}\n"
-        f"p = {p:.4g}{' *' if pass05 else ''}",
+        0.02, 0.95,
+        f"Real result: {real:.4f}\n"
+        f"Null mean±std: {sh_mean:.4f} ± {sh_std:.4f}\n"
+        f"Null range: [{sh_min:.4f}, {sh_max:.4f}]\n"
+        f"{p_text}{' *' if pass05 else ''}",
         transform=ax.transAxes,
         va="top",
         ha="left",
-        bbox=dict(boxstyle="round", alpha=0.15),
+        bbox=dict(boxstyle="round", facecolor='white', alpha=0.7),
     )
 
     fig.tight_layout()
     return ax
-
 
 
 
