@@ -9,35 +9,6 @@ from functions_scripts import save_results as sr
 ourCmap = pre.green_gray_magenta()
 
 
-
-
-'''
-########## OPTIONAL: Leave one group pair out splits for outer CV (instead of GroupKFold) ##########
-
-##########
-C_grid = np.logspace(-4, 2, 7)
-metric = "acc"
-rule = "one_se"
-tie_break = "smaller_C"
-
-# Outer: leave-one-(face group, nonface group)-out
-outer = lambda y_frames, groups: cv.leave_one_group_pair_out_splits(y_frames, groups, seed=0)
-inner = GroupKFold(n_splits=4)
-
-nested = cv.run_nested_cv_selectC_then_eval(
-    X_frames, y_frames,
-    groups=groups,
-    outer_splitter=outer,
-    inner_splitter=inner,
-    C_grid=C_grid,
-    metric=metric,
-    rule=rule,
-    tie_break=tie_break,
-)
-##########
-'''
-
-
 ################ 
 # Analysis for fixed window experiment
 ################
@@ -45,7 +16,7 @@ nested = cv.run_nested_cv_selectC_then_eval(
 
 ### which model to load and plot results from
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "fixed_window__frame32-40__SVM_10fold__2026-02-24_15-48-01" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "fixed_window__frame47-55__SVM_10fold__2026-03-02_14-55-16" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 
