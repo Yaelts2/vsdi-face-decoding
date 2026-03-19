@@ -1,3 +1,5 @@
+## function for model control (permutation test, sliding window permutation, etc.)
+
 import numpy as np
 from scipy.stats import mannwhitneyu
 from scripts.functions_scripts import ml_cv as cv
@@ -11,7 +13,6 @@ import warnings
 import numpy as np
 from statsmodels.stats.multitest import multipletests
 
-import numpy as np
 
 def run_permutation_nested_cv(X,y_trial,
                             groups,

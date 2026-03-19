@@ -1,12 +1,10 @@
 from pathlib import Path
 import sys
-
 script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent.parent
 print("Project root:", project_root)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
-
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, roc_curve, auc
@@ -167,7 +165,7 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 
 #example usage
 '''
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_110209a.npy")
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
 x_avg = x.mean(axis=2)
 x_avg_frames =  x_avg[:, 25:75]
 frame_ids = list(range(25, 75))     # 25..80 (56 frames)
@@ -267,7 +265,7 @@ def mimg(x, xsize=100, ysize=100, low='auto', high=None, frames=None, width=0,co
     return fig, axes_flat
 
 #example usage
-
+'''
 x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn5_110209a.npy")
 x_avg = x.mean(axis=2)
 x_avg_frames =  x_avg[:, 25:81]
@@ -277,7 +275,7 @@ X_avg, labels_ms, bin_frames = avg_consecutive_frames_with_ms_labels(
 )
 fig,axes_flat =mimg(X_avg-1, xsize=100, ysize=100, low=-0.0009, high=0.003,frames=labels_ms.astype(int), width=17)
 plt.show()
-
+'''
 
 
 
@@ -578,13 +576,10 @@ def plot_confusion_matrix(y_true=None,
     plt.show()
 
 
-def plot_roc_curve(
-    y_true=None,
-    y_scores=None,
-    results: dict | None = None,
-    title="ROC curve",
-    figsize=(5.5, 4.8),
-):
+def plot_roc_curve(y_true=None,y_scores=None,
+                results: dict | None = None,
+                title="ROC curve",
+                figsize=(5.5, 4.8)):
     """
     Plot ROC curve with AUC.
     Use either (y_true, y_scores) OR pass results dict containing oof arrays.

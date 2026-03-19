@@ -19,7 +19,7 @@ ourCmap = pre.green_gray_magenta()
 # Analysis for sliding window experiment #
 ###############
 
-
+## user must edit these parameters for each run!##
 ### which model to load and plot results from
 
 results_root = Path(r"C:\project\vsdi-face-decoding\results")

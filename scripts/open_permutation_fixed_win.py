@@ -12,7 +12,7 @@ ourCmap = pre.green_gray_magenta()
 # ploting the permutation results for a fixed window run
 ################
 
-
+## user must edit these parameters for each run!##
 ### which permutation test to load and plot results from
 results_root = Path(r"C:\project\vsdi-face-decoding\results\permutation_test")
 test_root = results_root / "fixed_window__frame32-40__SVM_10fold__2026-02-18_17-43-53__permutation__perm100__seed42__2026-02-20_01-59-40" # <-- update this to your model folder you want to load and plot results from

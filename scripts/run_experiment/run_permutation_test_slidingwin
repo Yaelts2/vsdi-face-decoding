@@ -11,13 +11,15 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from datetime import datetime
 import json
 import numpy as np
-
 from scripts.functions_scripts import preprocessing_functions as pre
 from scripts.functions_scripts import ml_cv as cv
 from scripts.functions_scripts import model_control as mc
 from scripts.functions_scripts import save_results as sr
 
-
+## user must edit these parameters for each run! (see config section below)##
+# =========================
+# CONFIG
+# =========================
 # USER SETTINGS
 RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
 
@@ -30,7 +32,8 @@ PERM_SEED = 42
 # Save destination root:
 PERM_ROOT = RESULTS_ROOT / "permutation_test_sliding_window"
 
-
+#================================#
+# No need to edit below here for each run (unless you want to change the permutation test itself)
 # 1) Load saved run (config + real results + ROI path)
 config, real_results, ROI_mask_path = sr.load_experiment(RUN_DIR)
 

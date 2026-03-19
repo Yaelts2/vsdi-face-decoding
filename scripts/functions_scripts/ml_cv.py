@@ -26,7 +26,6 @@ def compute_auc(estimator, X_test, y_true) -> Tuple[float, Optional[np.ndarray]]
 
     if np.unique(y_true).size < 2:
         return np.nan, None
-
     scores = None
 
     if hasattr(estimator, "decision_function"):
@@ -63,20 +62,20 @@ def get_splits(splitter, X, y, groups=None):
     y = np.asarray(y)
     n_samples = y.shape[0]
 
-    # --- Case 1: sklearn-style splitter object ---
+    #Case 1: sklearn-style splitter object ---
     if hasattr(splitter, "split"):
         if groups is None:
             it = splitter.split(X, y)
         else:
             it = splitter.split(X, y, np.asarray(groups))
 
-    # --- Case 2: custom splitter function ---
+    #Case 2: custom splitter function ---
     elif callable(splitter):
         if groups is None:
             raise ValueError("Custom splitter function requires 'groups'.")
         it = splitter(y, groups)
 
-    # --- Case 3: already an iterable of splits ---
+    #Case 3: already an iterable of splits ---
     else:
         it = splitter
 
@@ -161,14 +160,11 @@ def majority_vote_trial_predictions(y_pred, y_true, groups):
 # Fold execution
 # -----------------------------
 
-def fit_eval_one_fold(
-    fold_idx: int,
-    X: np.ndarray,
-    y: np.ndarray,
-    train_idx: np.ndarray,
-    test_idx: np.ndarray,
-    make_estimator: Callable[[], Any],
-) -> Dict[str, Any]:
+def fit_eval_one_fold(fold_idx: int,
+                    X: np.ndarray, y: np.ndarray,
+                    train_idx: np.ndarray,test_idx: np.ndarray,
+                    make_estimator: Callable[[], Any],
+                    ) -> Dict[str, Any]:
     """Fit on train split and evaluate on test split; return fold artifacts."""
     train_idx = np.asarray(train_idx, dtype=int).ravel()
     test_idx = np.asarray(test_idx, dtype=int).ravel()
@@ -611,4 +607,4 @@ def fit_final_model(X, y, C_final: float) -> Dict[str, Any]:
     est = make_linear_svm(C_final)
     est.fit(X, y)
     w = extract_linear_weights_general(est)
-    return {"estimator": est, "C": float(C_final), "w_scaled": w_scaled, "w": w}
+    return {"estimator": est, "C": float(C_final), "w": w}

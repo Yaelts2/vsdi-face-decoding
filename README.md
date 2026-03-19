@@ -1,6 +1,9 @@
 # VSDI Face Decoding
+Pipeline for decoding face vs. non-face stimuli from population-level neural activity recorded with **Voltage-Sensitive Dye Imaging (VSDI)** in primate visual cortex (V1, V2, V4).
 
-Pipeline for decoding face vs non-face VSDI activity using fixed-window and sliding-window linear SVM analyses, with permutation testing and post-hoc visualization.
+The project investigates how category information (faces) is represented across **space and time**, using linear SVM decoding, sliding-window analysis, and permutation-based statistical testing.
+
+---
 
 ## Project Structure
 
@@ -46,14 +49,6 @@ vsdi-face-decoding/
 pip install -r requirements.txt
 ```
 
-## Data Expectations
-
-Input data is expected as `.npy` condition arrays (typically generated from `.mat` files), with internal shape conventions used across the code:
-- trial-level arrays: `(pixels, frames, trials)`
-- labels: `(trials,)`
-- frame-as-sample arrays (for model fitting): `(samples, features)`
-
-Most scripts assume 100x100 maps (`pixels = 10000`) and a saved ROI mask in `data/processed/`.
 
 ## Saved Models and Results
 This project generates several types of outputs, including fixed-window classifications, sliding-window decodings, and their respective permutation tests.

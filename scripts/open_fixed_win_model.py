@@ -13,10 +13,10 @@ ourCmap = pre.green_gray_magenta()
 # Analysis for fixed window experiment
 ################
 
-
+## user must edit these parameters for each run!##
 ### which model to load and plot results from
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "fixed_window__frame47-55__SVM_10fold__2026-03-02_14-55-16" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "fixed_window__frame32-40__SVM_10fold__2026-02-24_15-48-01" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 

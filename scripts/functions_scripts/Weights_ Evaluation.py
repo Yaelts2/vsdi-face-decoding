@@ -5,8 +5,6 @@ ourCmap = green_gray_magenta()
 
 
 
-
-
 def weights_to_roi_image(w_roi,roi_mask_flat,pixels= 100, fill_value= np.nan,) -> np.ndarray:
     """
     Map a 1D weight vector defined on ROI pixels back into full image space.
@@ -49,24 +47,17 @@ def draw_weight_map(ax, img, cmap= ourCmap, clip= "sym", title= None,
     Draw a 2D weight map on an existing axis (no figure creation, no show).
 
     Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Axis to draw on.
-    img : np.ndarray, shape (pixels, pixels)
-        Weight image (output of weights_to_roi_image).
-    cmap : str
-        Colormap.
+    ax : matplotlib.axes.Axes-         Axis to draw on.
+    img : np.ndarray, shape (pixels, pixels)-         Weight image (output of weights_to_roi_image).
+    cmap : str-        Colormap.
     clip : tuple or "sym" or None
         - "sym": symmetric clipping around zero
         - (vmin, vmax): manual clipping
         - None: no clipping
     title : str or None
-        Optional title.
     show_colorbar : bool
-        Whether to add a colorbar to this axis.
 
     Returns
-    -------
     im : matplotlib.image.AxesImage
         Image handle (useful for shared colorbars).
     """
@@ -99,21 +90,13 @@ def plot_all_fold_weight_maps(W_outer,roi_mask_flat, pixels = 100,n_cols = 5,
     Plot all outer-fold weight maps in a grid.
 
     Parameters
-    ----------
-    W_outer : np.ndarray, shape (n_folds, n_features)
-        Per-fold weight vectors.
-    roi_mask_flat : np.ndarray, shape (pixels*pixels,)
-        ROI mask (flattened).
-    pixels : int
-        Image side length.
-    n_cols : int
-        Number of columns in the grid.
-    cmap : str
-        Colormap.
+    W_outer : np.ndarray, shape (n_folds, n_features)-        Per-fold weight vectors.
+    roi_mask_flat : np.ndarray, shape (pixels*pixels,)-        ROI mask (flattened).
+    pixels : int-        Image side length.
+    n_cols : int-        Number of columns in the grid.
+    cmap : str-        Colormap.
     clip : tuple or "sym" or None
-        Clipping mode.
-    figsize_per_panel : float
-        Size multiplier per panel.
+    figsize_per_panel : float-        Size multiplier per panel.
     """
     W_outer = np.asarray(W_outer, dtype=float)
     n_folds = W_outer.shape[0]
@@ -213,22 +196,14 @@ def extract_extreme_weight_masks(w_mean,roi_mask_flat, pixels= 100,frac = 0.20):
     Extract top positive and bottom negative weight masks from a mean weight vector.
 
     Parameters
-    ----------
-    w_mean : np.ndarray, shape (n_roi_pixels,)
-        Mean weight vector in ROI feature space.
-    roi_mask_flat : np.ndarray, shape (pixels*pixels,)
-        Boolean ROI mask (flattened full image).
-    pixels : int
-        Image side length (100 -> 10000 pixels).
-    frac : float
-        Fraction to select from each tail (e.g., 0.20 = 20%).
+    w_mean : np.ndarray, shape (n_roi_pixels,)-        Mean weight vector in ROI feature space.
+    roi_mask_flat : np.ndarray, shape (pixels*pixels,)-        Boolean ROI mask (flattened full image).
+    pixels : int-        Image side length (100 -> 10000 pixels).
+    frac : float-        Fraction to select from each tail (e.g., 0.20 = 20%).
 
     Returns
-    -------
-    pos_mask_flat : np.ndarray, shape (pixels*pixels,), dtype=bool
-        Mask of top positive weights.
-    neg_mask_flat : np.ndarray, shape (pixels*pixels,), dtype=bool
-        Mask of bottom negative weights.
+    pos_mask_flat : np.ndarray, shape (pixels*pixels,), dtype=bool-        Mask of top positive weights.
+    neg_mask_flat : np.ndarray, shape (pixels*pixels,), dtype=bool-        Mask of bottom negative weights.
     """
     w_mean = np.asarray(w_mean, dtype=float).ravel()
     roi_mask_flat = np.asarray(roi_mask_flat, dtype=bool).ravel()
@@ -273,22 +248,14 @@ def average_activation_by_weight_sign(X_roi,roi_mask_flat,
     Compute average activation over frames for positive- and negative-weight pixels.
 
     Parameters
-    ----------
-    X_roi : np.ndarray, shape (n_roi_pixels, n_frames, n_trials)
-        Data restricted to ROI pixels only.
-    roi_mask_flat : np.ndarray, shape (pixels*pixels,)
-        ROI mask in full image space.
-    pos_mask_flat : np.ndarray, shape (pixels*pixels,)
-        Positive-weight mask (full image space).
-    neg_mask_flat : np.ndarray, shape (pixels*pixels,)
-        Negative-weight mask (full image space).
+    X_roi : np.ndarray, shape (n_roi_pixels, n_frames, n_trials)-        Data restricted to ROI pixels only.
+    roi_mask_flat : np.ndarray, shape (pixels*pixels,)-        ROI mask in full image space.
+    pos_mask_flat : np.ndarray, shape (pixels*pixels,)-        Positive-weight mask (full image space).
+    neg_mask_flat : np.ndarray, shape (pixels*pixels,)-        Negative-weight mask (full image space).
 
     Returns
-    -------
-    pos_tc : np.ndarray, shape (n_frames,)
-        Mean activation across positive pixels and trials.
-    neg_tc : np.ndarray, shape (n_frames,)
-        Mean activation across negative pixels and trials.
+    pos_tc : np.ndarray, shape (n_frames,)-        Mean activation across positive pixels and trials.
+    neg_tc : np.ndarray, shape (n_frames,)-        Mean activation across negative pixels and trials.
     """
     X_roi = np.asarray(X_roi, dtype=float)
     roi_mask_flat = np.asarray(roi_mask_flat, dtype=bool)
@@ -363,9 +330,7 @@ def window_weights_to_pixel_time_matrix(w_mean_windows: np.ndarray,   # (n_windo
     Convert window-averaged ROI weights into a full-image pixel-by-time matrix.
 
     Returns
-    -------
-    W_pixel_time : np.ndarray
-        Shape: (pixels*pixels, n_windows)
+    W_pixel_time : np.ndarray-        Shape: (pixels*pixels, n_windows)
         Each column is one window.
         Rows correspond to flattened image pixels.
     """
@@ -407,19 +372,13 @@ def extract_extreme_weight_masks_sliding(W_img: np.ndarray,
     - bottom `frac` of NEGATIVE weights within ROI -> neg mask
 
     Parameters
-    ----------
-    W_img : np.ndarray, shape (10000, n_windows)
-        Weight maps in full-image space for each window.
-    ROI_mask : np.ndarray, shape (10000,) or (10000,1)
-        Boolean ROI mask in full-image space.
-    frac : float
-        Fraction to select from each tail (e.g., 0.20 = 20%).
-    strict_sign : bool
-        If True: positive mask uses only weights > 0; negative mask uses only weights < 0.
+    W_img : np.ndarray, shape (10000, n_windows)-        Weight maps in full-image space for each window.
+    ROI_mask : np.ndarray, shape (10000,) or (10000,1)-        Boolean ROI mask in full-image space.
+    frac : float        Fraction to select from each tail (e.g., 0.20 = 20%).
+    strict_sign : bool-        If True: positive mask uses only weights > 0; negative mask uses only weights < 0.
         If False: thresholds are computed over ROI weights regardless of sign (less recommended here).
 
     Returns
-    -------
     pos_mask_mat : np.ndarray, shape (10000, n_windows), dtype=bool
     neg_mask_mat : np.ndarray, shape (10000, n_windows), dtype=bool
     pos_thresh : np.ndarray, shape (n_windows,), dtype=float

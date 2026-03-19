@@ -17,9 +17,11 @@ from scripts.functions_scripts import model_control as mc
 from scripts.functions_scripts import save_results as sr
 
 
-# ------------------------------------------------------------
-# USER: set which saved model/run to test
-# ------------------------------------------------------------
+## user must edit these parameters for each run! (see config section below)##
+# =========================
+# CONFIG
+# =========================
+
 
 RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
 
@@ -34,7 +36,7 @@ PERM_SEED = 42
 PERM_ROOT = RESULTS_ROOT / "permutation_test"
 
 
-
+## No need to edit below here for each run (unless you want to change the permutation test itself)##
 # 1) Load saved model run (config + real nested results + ROI)
 config, real_nested, ROI_mask_path = sr.load_experiment(RUN_DIR)
 

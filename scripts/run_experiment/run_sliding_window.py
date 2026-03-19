@@ -15,10 +15,10 @@ from scripts.functions_scripts.save_results import save_experiment
 ourCmap = pre.green_gray_magenta()
 
 
-# to run this script run this line in terminal:
-# .\.venv\Scripts\python.exe -m scripts.run_experiment.run_sliding_window
 
 
+
+## user must edit these parameters for each run! (see config section below)##
 # =========================
 # CONFIG
 # =========================

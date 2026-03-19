@@ -28,6 +28,8 @@ def frames_as_samples(data_3d,y_trials, trial_axis=-1, frame_axis=1, pixel_axis=
 
 
 def extract_window(data, start=35, end=45):
+    '''Extracts a window of frames from 3D brain data (Pixels, Frames, Trials).
+    Returns data with shape (Pixels, WindowFrames, Trials).'''
     if start < 0 or end > data.shape[1]:
         raise ValueError(f"Window [{start}:{end}] out of bounds for n_frames={data.shape[1]}")
     return data[:, start:end, :]
@@ -40,13 +42,14 @@ def create_ROI(map_flat, pixels=100):
     returns:
         mask_flat : (pixels*pixels,) bool
         roi_idx   : indices where mask == True
+    the user can click to define a polygon ROI on the displayed map, and the function
+    returns a boolean mask of which pixels are in the ROI and their indices.
     """
     fig, axes_flat = pl.mimg(map_flat.reshape(-1, 1) - 1,
                         xsize=pixels, ysize=pixels,
                         low=-0.0005, high=0.002)
     ax = axes_flat[0]
     ax.set_title("ROI: left click = add point, right click = finish")
-    # show + make sure GUI is ready BEFORE ginput
     plt.show(block=False)
     plt.pause(0.05)
     plt.sca(ax)  # ensure clicks go to this axes

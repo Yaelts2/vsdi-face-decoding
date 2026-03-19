@@ -16,7 +16,7 @@ from scripts.functions_scripts.save_results import save_experiment
 from sklearn.model_selection import GroupKFold
 
 
-
+## user must edit these parameters for each run! (see config section below)##
 # =========================
 # CONFIG
 # =========================

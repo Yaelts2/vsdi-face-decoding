@@ -14,7 +14,7 @@ EPS = 1e-8
 DTYPE = np.float32
 ZERO_FRAMES = (5, 25)  # frames to use for frame-zero normalization
 
-'''
+
 pre.split_conds_files(raw_dir=RAW_DIR,
                 out_dir=SPLIT_DIR,
                 overwrite=OVERWRITE,
@@ -36,7 +36,7 @@ pre.normalize_to_clean_blank(blank_cond=BLANK_COND,
                         dtype=DTYPE,
                         eps=EPS)
 
-'''
+
 
 # Example usage of mimg function
 x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
