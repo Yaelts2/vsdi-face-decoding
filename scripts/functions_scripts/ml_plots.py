@@ -82,12 +82,13 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
     ys_eff = nrows * ybin
 
     # Convert (pixels, frames, conds) -> (ys, xs, frames, conds)
-    img = X.reshape(ys, xs, nframes, nconds)
+    img = X.reshape(xs, ys, nframes, nconds, order='F')  # column-major like MATLAB
+    img = img.transpose(1, 0, 2, 3)                       # swap to (ys, xs, frames, conds)
+
     # Crop to multiples of bin size
     img = img[:ys_eff, :xs_eff, :, :]  # (ys_eff, xs_eff, frames, conds)
 
-    # Block mean:
-    # (nrows, ybin, ncols, xbin, frames, conds) -> mean over ybin & xbin
+    # Block mean: (nrows, ybin, ncols, xbin, frames, conds) -> mean over ybin & xbin
     b = img.reshape(nrows, ybin, ncols, xbin, nframes, nconds).mean(axis=(1, 3))
     # b shape: (nrows, ncols, frames, conds)
 
@@ -167,9 +168,9 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 '''
 x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
 x_avg = x.mean(axis=2)
-x_avg_frames =  x_avg[:, 25:75]
-frame_ids = list(range(25, 75))     # 25..80 (56 frames)
-binned, fig, axes, cid =plot_superpixel_traces(x_avg_frames, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
+x_avg_frames =  x_avg[:, 2:75]
+frame_ids = list(range(2, 75))     # 25..80 (56 frames)
+binned, fig, axes, cid =plot_superpixel_traces(x_avg_frames-1, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
 plt.show()
 '''
 

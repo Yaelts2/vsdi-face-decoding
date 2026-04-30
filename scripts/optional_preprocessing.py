@@ -36,7 +36,7 @@ pre.normalize_to_clean_blank(blank_cond=BLANK_COND,
                         dtype=DTYPE,
                         eps=EPS)
 
-
+'''
 
 # Example usage of mimg function
 x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
@@ -50,3 +50,4 @@ x_avg_frames=np.mean(x_avg_frames,axis=1)
 ROI_mask,roi_idx=fe.creat_ROI(x_avg_frames, pixels=100)
 # save ROI mask for future use
 np.save(r"C:\project\vsdi-face-decoding\data\processed\ROI_onlyV24_mask.npy", ROI_mask)
+'''

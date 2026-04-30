@@ -15,7 +15,7 @@ ourCmap = pre.green_gray_magenta()
 ## user must edit these parameters for each run!##
 ### which permutation test to load and plot results from
 results_root = Path(r"C:\project\vsdi-face-decoding\results\permutation_test_sliding_window")
-test_root = results_root / "slidingwindow__perm1000__seed42__2026-02-26_17-34-13" # <-- update this to your model folder you want to load and plot results from
+test_root = results_root / "slidingwindow__perm1000__seed42__2026-03-26_03-52-01" # <-- update this to your model folder you want to load and plot results from
 print("test_root:", test_root)
 prem_results = sr.load_sliding_window_permutation(str(test_root))
 # sig01 from your permutation-mean-across-folds function:

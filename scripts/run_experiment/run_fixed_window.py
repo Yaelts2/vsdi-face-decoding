@@ -31,7 +31,7 @@ Baseline_frames_zscore= (1, 24)
 
 # Feature extraction:
 window= (47, 55)  #(start, end)
-ROI_mask_path= "data/processed/ROI_mask2.npy"
+ROI_mask_path= "data/processed/v2_mask.npy"
 
 
 # Model / validation:
@@ -79,7 +79,7 @@ print("Data z-scored across all trials.")
 
 #feature extraction: window + ROI
 ##ROI selection
-ROI_mask=np.load(ROI_mask_path)  # boolean mask in full image space (10000,) or (100,100)
+ROI_mask = np.load(ROI_mask_path).astype(bool) # boolean mask in full image space (10000,) or (100,100)
 pl.mimg(ROI_mask, xsize=100, ysize=100, low=0, high=1)
 print(f"ROI mask loaded: {ROI_mask.shape}")
 X_roi=X_z[ROI_mask,:,:] # (roi_pixels x frames x trials)

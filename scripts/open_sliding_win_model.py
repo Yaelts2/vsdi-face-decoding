@@ -8,7 +8,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 import matplotlib.pyplot as plt
 from functions_scripts import preprocessing_functions as pre
-from functions_scripts import ml_evaluation as ev
+from functions_scripts import Weights_Evaluation as ev
 from functions_scripts import ml_plots as pl
 from functions_scripts import save_results as sr
 from functions_scripts import sliding_win as sw
@@ -23,7 +23,7 @@ ourCmap = pre.green_gray_magenta()
 ### which model to load and plot results from
 
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "sliding_window__frame0-100__SVM_5foldCV__2026-02-25_15-08-54" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "sliding_window__frame0-100__SVM_5foldCV____2026-04-30_15-37-51" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 

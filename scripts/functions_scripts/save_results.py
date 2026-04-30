@@ -50,7 +50,7 @@ def save_experiment(results_root: str | Path,experiment: str, experiment_tag: st
     results_root.mkdir(parents=True, exist_ok=True)
 
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # timestamp for the model run
-    run_dir = results_root / f"{experiment}__{experiment_tag}__{ts}"    
+    run_dir = results_root / f"{experiment}__{experiment_tag}____{ts}"    
     run_dir.mkdir(parents=True, exist_ok=False)
     
     #config.json 

@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 # Model factories
 # -----------------------------
 def make_linear_svm(C: float = 0.001, max_iter: int = 10000) -> LinearSVC:
-    return LinearSVC(C=C, dual=True, max_iter=max_iter)
+    return LinearSVC(C=C, dual=False, max_iter=max_iter, random_state=42)
 
 
 # -----------------------------

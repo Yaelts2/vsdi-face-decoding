@@ -47,7 +47,7 @@ def split_conds_files(raw_dir="data/raw_mat",
 
 
 
-def frame_zero_normalize_all_conds(in_dir="data/processed/all_conds_npy",
+def frame_zero_normalize_all_conds(in_dir="data/processed/all_conds_split",
                                 out_dir="data/processed/condsX",
                                 zero_frames=(24, 25, 26),   # MATLAB 25:27 -> Python
                                 overwrite=False,
@@ -65,15 +65,15 @@ def frame_zero_normalize_all_conds(in_dir="data/processed/all_conds_npy",
         return
     zf = np.array(zero_frames, dtype=int)
     for file in files:
-        mat = np.load(file).astype(dtype, copy=False)   # (pixels, frames, trials)
+        mat = np.load(file).astype(np.float64)          # float64 for precision
         if mat.ndim != 3:
             raise ValueError(f"{file.name}: expected 3D array, got {mat.shape}")
         # baseline: (pixels, trials)
         baseline = mat[:, zf, :].mean(axis=1)
-        # safe baseline (avoid /0) - simpler than np.where
+        # safe baseline (avoid /0)
         baseline = np.maximum(np.abs(baseline), eps) * np.sign(baseline + eps)
-        # normalize (broadcast)
-        norm_mat = (mat / baseline[:, None, :]).astype(dtype, copy=False)
+        # normalize (broadcast), cast to dtype only when saving
+        norm_mat = (mat / baseline[:, None, :]).astype(dtype)
         # filename: conds1_030209a.npy -> condsX1_030209a.npy
         out_name = file.name.replace("conds", "condsX", 1)
         np.save(out_dir / out_name, norm_mat)
@@ -85,8 +85,7 @@ def normalize_to_clean_blank(blank_cond=3,
                             out_dir="data/processed/condsXn",
                             overwrite=False,
                             dtype=np.float32,
-                            eps=1e-12
-                            ):
+                            eps=1e-12):
     in_dir = Path(in_dir)
     out_dir = Path(out_dir)
     if out_dir.exists() and not overwrite:
@@ -103,24 +102,22 @@ def normalize_to_clean_blank(blank_cond=3,
         cond_str, session = stem.split("_", 1)
         cond_num = int(cond_str)
         sessions.setdefault(session, {})[cond_num] = f
-    #process each session separately
+
     for session, cond_files in sessions.items():
         if blank_cond not in cond_files:
             raise ValueError(f"Session {session} has no blank condition (cond{blank_cond})")
-        # load blank and compute mean across trials
-        blank_mat = np.load(cond_files[blank_cond]).astype(dtype, copy=False)
+        # load blank in float64 and compute mean across trials
+        blank_mat = np.load(cond_files[blank_cond]).astype(np.float64)  # float64 for precision
         blank_mean = np.nanmean(blank_mat, axis=2)   # (pixels, frames)
-        blank_mean = np.where(np.abs(blank_mean) < eps, eps, blank_mean) # avoid /0
+        blank_mean = np.where(np.abs(blank_mean) < eps, eps, blank_mean)  # avoid /0
         for cond_num, file in cond_files.items():
-            mat = np.load(file).astype(dtype, copy=False)
+            mat = np.load(file).astype(np.float64)   # float64 for precision
             out_name = file.name.replace("condsX", "condsXn", 1)
             out_path = out_dir / out_name
             if cond_num == blank_cond:
-                # blank condition saved unchanged
-                np.save(out_path, mat)
+                np.save(out_path, mat.astype(dtype))  # cast when saving
             else:
-                # divide each trial by blankMean
-                new_mat = (mat / blank_mean[:, :, None]).astype(dtype, copy=False)
+                new_mat = (mat / blank_mean[:, :, None]).astype(dtype)  # cast when saving
                 np.save(out_path, new_mat)
     print(f"Done. Saved blank-normalized files to: {out_dir.resolve()}")
 

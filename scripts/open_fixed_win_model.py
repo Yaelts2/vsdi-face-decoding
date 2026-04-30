@@ -2,7 +2,7 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 from functions_scripts import preprocessing_functions as pre
-from functions_scripts import ml_evaluation as ev
+from functions_scripts import Weights_Evaluation as ev
 from functions_scripts import ml_plots as pl
 from functions_scripts import save_results as sr
 
@@ -16,7 +16,7 @@ ourCmap = pre.green_gray_magenta()
 ## user must edit these parameters for each run!##
 ### which model to load and plot results from
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "fixed_window__frame32-40__SVM_10fold__2026-02-24_15-48-01" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "fixed_window__frame47-55__SVM_10fold__V2__2026-04-26_13-19-03" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 
