@@ -1,17 +1,19 @@
 # ml_cv.py
 from __future__ import annotations
+import warnings
 import numpy as np
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Any
 from joblib import Parallel, delayed
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
+from sklearn.exceptions import ConvergenceWarning
 
 
 # -----------------------------
 # Model factories
 # -----------------------------
 def make_linear_svm(C: float = 0.001, max_iter: int = 10000) -> LinearSVC:
-    return LinearSVC(C=C, dual=False, max_iter=max_iter, random_state=42)
+    return LinearSVC(C=C, dual=False, max_iter=max_iter, random_state=42, tol=1e-7)
 
 
 # -----------------------------
@@ -173,7 +175,9 @@ def fit_eval_one_fold(fold_idx: int,
     X_te, y_te = X[test_idx],  y[test_idx]
 
     est = make_estimator()
-    est.fit(X_tr, y_tr)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ConvergenceWarning)
+        est.fit(X_tr, y_tr)
 
     y_pred = est.predict(X_te)
     acc = float(accuracy_score(y_te, y_pred))
@@ -259,7 +263,7 @@ def add_oof_outputs(results: Dict[str, Any], fold_results: Sequence[Dict[str, An
 # -----------------------------
 # split LOPO
 # -----------------------------
-def leave_one_group_pair_out_splits(y, groups, seed=0):
+def leave_one_group_pair_out_splits(y, groups, seed=42):
     y = np.asarray(y).astype(int)
     groups = np.asarray(groups)
     all_idx = np.arange(len(y))

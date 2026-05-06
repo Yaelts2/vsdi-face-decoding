@@ -23,7 +23,7 @@ ourCmap = pre.green_gray_magenta()
 ### which model to load and plot results from
 
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "sliding_window__frame0-100__SVM_5foldCV____2026-04-30_15-37-51" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "sliding_window__frame0-100__SVM_5foldCV____2026-04-30_17-47-32" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 

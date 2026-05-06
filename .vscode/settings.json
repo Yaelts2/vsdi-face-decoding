@@ -1,8 +1,8 @@
 {
-    "python-envs.pythonProjects": [],
     "cSpell.words": [
         "conds",
         "NONFACE",
         "timecourses"
-    ]
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

@@ -64,6 +64,12 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
         fold_acc_t = []
         W_folds = []
         # kfold for a single window
+        
+        sort_order = np.argsort(groups, kind='stable')
+        X_frames = X_frames[sort_order]
+        y_frames = y_frames[sort_order]
+        groups   = groups[sort_order]
+
         for tr_idx, te_idx in gkf.split(X_frames, y_frames, groups):
             clf = make_estimator()
             clf.fit(X_frames[tr_idx], y_frames[tr_idx])

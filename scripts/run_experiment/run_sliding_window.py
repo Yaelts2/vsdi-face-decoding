@@ -1,3 +1,8 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 from pathlib import Path
 import sys
 script_dir = Path(__file__).resolve().parent
@@ -6,7 +11,7 @@ print("Project root:", project_root)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
-np.random.seed(42)
+
 import matplotlib.pyplot as plt
 from scripts.functions_scripts import preprocessing_functions as pre
 from scripts.functions_scripts import ml_cv as cv
@@ -14,7 +19,6 @@ from scripts.functions_scripts import ml_plots as pl
 from scripts.functions_scripts import sliding_win as sw
 from scripts.functions_scripts.save_results import save_experiment
 ourCmap = pre.green_gray_magenta()
-
 
 
 
@@ -38,7 +42,7 @@ ROI_mask_path= "data/processed/ROI_mask2.npy"
 # Model :
 model=lambda: cv.make_linear_svm(C=0.0001, max_iter=100000)
 window_size=int(5)  # number of frames in sliding window
-start_frame=int(0) # first center frame to decode (e.g. 15 means window covers frames 13-17)
+start_frame=int(1) # first center frame to decode (e.g. 15 means window covers frames 13-17)
 stop_frame=int(100) # last center frame to decode (e.g. 125 means window covers frames 123-127, but if stop_frame=126 it would be last center frame 124 with window covering 122-126)
 step=int(1) # step size to move window (e.g. 1 means decode every center frame, 5 means decode every 5th center frame)
 n_splits=int(5) # kfold for each window
