@@ -40,12 +40,13 @@ Baseline_frames_zscore= (1, 24)
 ROI_mask_path= "data/processed/ROI_mask2.npy"
 
 # Model :
-model=lambda: cv.make_linear_svm(C=0.0001, max_iter=100000)
+SEED = 42
+model=lambda: cv.make_linear_svm(C=0.0001, max_iter=100000, random_state=SEED)
 window_size=int(5)  # number of frames in sliding window
 start_frame=int(1) # first center frame to decode (e.g. 15 means window covers frames 13-17)
 stop_frame=int(100) # last center frame to decode (e.g. 125 means window covers frames 123-127, but if stop_frame=126 it would be last center frame 124 with window covering 122-126)
 step=int(1) # step size to move window (e.g. 1 means decode every center frame, 5 means decode every 5th center frame)
-n_splits=int(5) # kfold for each window
+n_splits=int(10) # kfold for each window
 
 # save model results path:
 results_root = "C:\\project\\vsdi-face-decoding\\results"
@@ -123,6 +124,7 @@ dataset_info.update({"face_file": face_file,
                     "data_dir": data_dir,
                     "zscore_baseline_frames": Baseline_frames_zscore,
                     "model": "linear SVM",
+                    "random_state": SEED,
                     "window_size": window_size,
                     "start_frame": start_frame,
                     "stop_frame": stop_frame,

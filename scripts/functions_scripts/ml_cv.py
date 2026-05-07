@@ -7,13 +7,17 @@ from joblib import Parallel, delayed
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
 
 
 # -----------------------------
 # Model factories
 # -----------------------------
-def make_linear_svm(C: float = 0.001, max_iter: int = 10000) -> LinearSVC:
-    return LinearSVC(C=C, dual=False, max_iter=max_iter, random_state=42, tol=1e-7)
+def make_linear_svm(C: float = 0.0001, max_iter: int = 10000, random_state: int = 42) -> LinearSVC:
+    return LinearSVC(C=C, dual=False, max_iter=max_iter, random_state=random_state, tol=1e-7)
+
 
 
 # -----------------------------
@@ -467,6 +471,7 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
                                     metric: str = "acc", tie_break: str = "smaller_C", rule: str = "one_se",
                                     n_jobs_inner: int = 1,
                                     verbose: bool = True,
+                                    random_state: int = 42,
                                     ) -> Dict[str, Any]:
     """
     Nested CV:
@@ -507,10 +512,10 @@ def run_nested_cv_selectC_then_eval(X, y, groups, outer_splitter, inner_splitter
                                             expect_full_coverage=False,
                                             n_jobs=n_jobs_inner,
                                             verbose=False,
-                                            make_estimator_for_C=lambda C: make_linear_svm(C))
+                                            make_estimator_for_C=lambda C, rs=random_state: make_linear_svm(C, random_state=rs))
         chosen_Cs.append(float(best_C))
 
-        clf = make_linear_svm(best_C)
+        clf = make_linear_svm(best_C, random_state=random_state)
         clf.fit(X_tr, y_tr)
 
         y_pred = clf.predict(X_te)

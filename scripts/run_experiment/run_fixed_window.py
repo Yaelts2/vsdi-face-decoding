@@ -40,6 +40,7 @@ ROI_mask_path= "data/processed/v2_mask.npy"
 
 
 # Model / validation:
+SEED = 42
 outer_cv= "GroupKFold(n_splits=10)"
 inner_cv= "GroupKFold(n_splits=4)"
 outer = GroupKFold(n_splits=10)
@@ -119,7 +120,8 @@ nested = cv.run_nested_cv_selectC_then_eval(X_frames, y_frames,groups=groups,out
                                             rule=rule,
                                             tie_break=tie_break,
                                             n_jobs_inner=1,
-                                            verbose=True)
+                                            verbose=True,
+                                            random_state=SEED)
 
 print("\n=== Nested CV summary ===")
 print(f"Outer acc: {nested['outer_acc_mean']:.4f} ± {nested['outer_acc_std']:.4f}")
@@ -145,7 +147,8 @@ dataset_info.update({"face_file": face_file,
                     "rule": rule,
                     "tie_break": tie_break,
                     "outer_cv": outer_cv,
-                    "inner_cv": inner_cv})
+                    "inner_cv": inner_cv,
+                    "random_state": SEED})
 
 run_dir = save_experiment(results_root=results_root,
                         experiment="fixed_window",

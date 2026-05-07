@@ -217,7 +217,7 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
                                     step=1,
                                     n_splits=5,
                                     n_perm=100,
-                                    seed=0,
+                                    seed=42,
                                     return_null=False,
                                     return_perm_stats=False,
                                     verbose=True,   

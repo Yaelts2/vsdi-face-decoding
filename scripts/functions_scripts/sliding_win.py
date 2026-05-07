@@ -7,7 +7,20 @@ from scripts.functions_scripts import ml_cv as cv
 from scripts.functions_scripts import save_results as sr
 
 
-
+def deterministic_group_kfold(groups, n_splits):
+    """Deterministic GroupKFold that gives identical results on any machine."""
+    unique_groups = np.sort(np.unique(groups))  # always sorted the same way
+    n_groups = len(unique_groups)
+    fold_assignments = np.arange(n_groups) % n_splits  # deterministic assignment
+    
+    splits = []
+    for fold in range(n_splits):
+        test_groups = unique_groups[fold_assignments == fold]
+        test_mask = np.isin(groups, test_groups)
+        te_idx = np.where(test_mask)[0]
+        tr_idx = np.where(~test_mask)[0]
+        splits.append((tr_idx, te_idx))
+    return splits
 
 
 def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, trials)  e.g. (8518, 256, 56)
@@ -39,7 +52,6 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
     if last_start < start_frame:
         raise ValueError("stop_frame is too early for the given start_frame/window_size")
 
-    gkf = GroupKFold(n_splits=n_splits)
 
     centers = []
     frame_acc_mean, frame_acc_std = [], []
@@ -70,7 +82,7 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
         y_frames = y_frames[sort_order]
         groups   = groups[sort_order]
 
-        for tr_idx, te_idx in gkf.split(X_frames, y_frames, groups):
+        for tr_idx, te_idx in deterministic_group_kfold(groups, n_splits):
             clf = make_estimator()
             clf.fit(X_frames[tr_idx], y_frames[tr_idx])
             y_pred = clf.predict(X_frames[te_idx])
