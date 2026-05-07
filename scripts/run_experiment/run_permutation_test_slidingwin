@@ -65,7 +65,8 @@ step = int(config.get("step", 1))
 n_splits = int(config.get("n_splits", 5))
 
 
-make_estimator = lambda: cv.make_linear_svm(C=0.0001)
+SVM_SEED = 42
+make_estimator = lambda: cv.make_linear_svm(C=0.0001, max_iter=100000, random_state=SVM_SEED)
 
 
 # 3) Rebuild dataset (X_trials, y_trials) + same preprocessing + ROI
@@ -120,7 +121,8 @@ perm_config = {"source_run_dir": str(RUN_DIR),
             "step": int(step),
             "n_splits": int(n_splits),
             # model identity (keep whatever you store)
-            "estimator": config.get("model", None)}
+            "estimator": config.get("model", None),
+            "svm_random_state": SVM_SEED}
 
 with open(save_dir / "config.json", "w", encoding="utf-8") as f:
     json.dump(perm_config, f, indent=2)

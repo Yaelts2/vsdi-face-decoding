@@ -8,7 +8,7 @@ from scripts.functions_scripts import save_results as sr
 
 
 def deterministic_group_kfold(groups, n_splits):
-    """Deterministic GroupKFold that gives identical results on any machine."""
+    """Deterministic GroupKFold that gives identical results on any machinegit add .."""
     unique_groups = np.sort(np.unique(groups))  # always sorted the same way
     n_groups = len(unique_groups)
     fold_assignments = np.arange(n_groups) % n_splits  # deterministic assignment
