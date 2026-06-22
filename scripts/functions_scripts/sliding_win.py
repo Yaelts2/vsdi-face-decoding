@@ -27,8 +27,8 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
                                     y_trials,               # (trials,)
                                     make_estimator,         # callable -> fresh estimator each fold
                                     window_size=5,
-                                    start_frame=15,
-                                    stop_frame=125,         # stop_frame
+                                    start_frame=1,
+                                    stop_frame=100,         # stop_frame
                                     step=1,
                                     n_splits=5,
                                     return_fold_weights=False):

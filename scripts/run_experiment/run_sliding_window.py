@@ -29,8 +29,8 @@ ourCmap = pre.green_gray_magenta()
 # =========================
 
 # Data files:
-face_file= "condsXn1_110209a.npy"
-nonface_file= "condsXn5_110209a.npy"
+face_file= "condsXn2_110209d.npy"
+nonface_file= "condsXn4_110209d.npy"
 data_dir= "data/processed/condsXn/"
 
 # Preprocessing:
@@ -133,7 +133,7 @@ dataset_info.update({"face_file": face_file,
 
 run_dir = save_experiment(results_root=results_root,
                         experiment="sliding_window",
-                        experiment_tag=f"frame{start_frame}-{stop_frame}__SVM_{n_splits}foldCV",
+                        experiment_tag=f"110209d15_frame{start_frame}-{stop_frame}__SVM_{n_splits}foldCV",
                         results=results,
                         ROI_mask_path=ROI_mask_path,
                         dataset_info=dataset_info)
