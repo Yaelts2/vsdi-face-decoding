@@ -139,7 +139,9 @@ def permutation_significance_test_fixed(real_score, shuffled_scores, chance_leve
         "p_value": p_value,
         "pass": p_value < 0.05,
         "shuffled_mean": np.mean(shuffled_scores),
-        "shuffled_std": np.std(shuffled_scores, ddof=1)
+        "shuffled_std": np.std(shuffled_scores, ddof=1),
+        "shuffled_min": np.min(shuffled_scores),
+        "shuffled_max": np.max(shuffled_scores)
     }
 
 
@@ -224,37 +226,63 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
                                     ):
     """
     Sliding-window permutation test that reuses the REAL decoding pipeline.
+ 
+    Computes the real (non-permuted) decoding curve once, builds a null
+    distribution from n_perm label permutations, and reports a two-tailed
+    p-value per window:
+ 
+        p = mean(|null - null_mean| >= |real - null_mean|)
+ 
+    This tests whether the real accuracy deviates from the null distribution
+    in EITHER direction (significantly above OR below chance), rather than
+    only testing for above-chance decoding.
     """
-
+ 
     X = np.asarray(X_pix_frames_trials)
     y_trials = np.asarray(y_trials).astype(int)
-
+ 
     if X.ndim != 3:
         raise ValueError(f"X must be 3D (pixels, frames, trials); got shape {X.shape}")
-
+ 
     n_pixels, n_frames, n_trials = X.shape
     if y_trials.shape[0] != n_trials:
         raise ValueError(f"y_trials has {y_trials.shape[0]} but X has {n_trials} trials")
-
+ 
     stop_frame = min(int(stop_frame), n_frames)
     last_start = min(n_frames - window_size, stop_frame - window_size)
     if last_start < start_frame:
         raise ValueError("stop_frame is too early for the given start_frame/window_size")
-
+ 
     centers = np.asarray([s + window_size // 2 for s in range(start_frame, last_start + 1, step)])
     n_windows = centers.size
-
+ 
     rng = np.random.default_rng(seed)
-
+ 
+    # -------- Real (non-permuted) decoding curve --------
+    real_out = sw.sliding_window_decode_with_stats(X_pix_frames_trials=X,
+                                                y_trials=y_trials,
+                                                make_estimator=make_estimator,
+                                                window_size=window_size,
+                                                start_frame=start_frame,
+                                                stop_frame=stop_frame,
+                                                step=step,
+                                                n_splits=n_splits)
+ 
+    if real_out["centers"].shape[0] != n_windows or not np.all(real_out["centers"] == centers):
+        raise RuntimeError("Real decode returned different centers than expected.")
+ 
+    real_frame_curve = np.asarray(real_out["frame_acc_mean"], dtype=float)
+    real_trial_curve = np.asarray(real_out["trial_acc_mean"], dtype=float)
+ 
     null_frame_curves = np.zeros((n_perm, n_windows), dtype=float)
     null_trial_curves = np.zeros((n_perm, n_windows), dtype=float)
     null_trial_folds = np.zeros((n_perm, n_windows, n_splits), dtype=float)
     
     perm_stats = [] if return_perm_stats else None
-
+ 
     #progress setup (10%)
     progress_every = max(1, n_perm // 10)
-
+ 
     for p in range(n_perm):
         y_perm = rng.permutation(y_trials)
         perm_out = sw.sliding_window_decode_with_stats(X_pix_frames_trials=X,
@@ -265,10 +293,10 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
                                                     stop_frame=stop_frame,
                                                     step=step,
                                                     n_splits=n_splits)
-
+ 
         if perm_out["centers"].shape[0] != n_windows or not np.all(perm_out["centers"] == centers):
             raise RuntimeError("Permutation decode returned different centers than expected.")
-
+ 
         null_frame_curves[p, :] = np.asarray(perm_out["frame_acc_mean"], dtype=float)
         null_trial_curves[p, :] = np.asarray(perm_out["trial_acc_mean"], dtype=float)
         null_trial_folds[p, :, :] = np.asarray(perm_out["fold_trial_acc"], dtype=float)
@@ -281,7 +309,7 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
                 "trial_acc_mean": perm_out["trial_acc_mean"], 
                 "trial_acc_std":  perm_out["trial_acc_std"]
             })
-
+ 
         # -------- Progress printing (minimal logic) --------
         if verbose and ((p + 1) % progress_every == 0 or (p + 1) == n_perm):
             mean_frame = float(np.mean(null_frame_curves[p]))
@@ -289,18 +317,34 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
             print(f"  Permutation {p + 1}/{n_perm} "
                 f"| mean_frame_acc={mean_frame:.4f} "
                 f"| mean_trial_acc={mean_trial:.4f}")
-
+ 
     # Summary across permutations
     null_frame_mean = np.mean(null_frame_curves, axis=0)
     null_frame_std  = np.std(null_frame_curves, axis=0)
     null_trial_mean = np.mean(null_trial_curves, axis=0)
     null_trial_std  = np.std(null_trial_curves, axis=0)
-
+ 
+    # -------- Two-tailed p-values --------
+    # p = mean(|null - null_mean| >= |real - null_mean|)
+    # Adding 1 to numerator/denominator is the standard correction so that
+    # p can never be exactly 0 (real data is itself one valid draw under H0).
+    real_frame_dev = np.abs(real_frame_curve - null_frame_mean)          # (n_windows,)
+    null_frame_dev = np.abs(null_frame_curves - null_frame_mean[None, :])  # (n_perm, n_windows)
+    p_frame = (np.sum(null_frame_dev >= real_frame_dev[None, :], axis=0) + 1) / (n_perm + 1)
+ 
+    real_trial_dev = np.abs(real_trial_curve - null_trial_mean)
+    null_trial_dev = np.abs(null_trial_curves - null_trial_mean[None, :])
+    p_trial = (np.sum(null_trial_dev >= real_trial_dev[None, :], axis=0) + 1) / (n_perm + 1)
+ 
     out = {"centers": centers,
+        "real_frame_acc": real_frame_curve,
+        "real_trial_acc": real_trial_curve,
         "null_frame_acc_mean": null_frame_mean,
         "null_frame_acc_std":  null_frame_std,
         "null_trial_acc_mean": null_trial_mean,
         "null_trial_acc_std":  null_trial_std,
+        "p_frame_two_tailed": p_frame,
+        "p_trial_two_tailed": p_trial,
         "params": {"window_size": int(window_size),
                 "start_frame": int(start_frame),
                 "stop_frame": int(stop_frame),
@@ -309,15 +353,15 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
                 "n_perm": int(n_perm),
                 "seed": int(seed)}
     }
-
+ 
     if return_null:
         out["null_frame_acc"] = null_frame_curves          # (n_perm, n_windows)
         out["null_trial_acc"] = null_trial_curves          # (n_perm, n_windows)
         out["null_trial_folds"] = null_trial_folds         # (n_perm, n_windows, n_splits)
-
+ 
     if return_perm_stats:
         out["perm_stats"] = perm_stats
-
+ 
     return out
 
 

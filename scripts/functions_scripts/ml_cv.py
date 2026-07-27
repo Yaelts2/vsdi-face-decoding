@@ -15,8 +15,8 @@ from sklearn.pipeline import Pipeline
 # -----------------------------
 # Model factories
 # -----------------------------
-def make_linear_svm(C: float = 0.0001, max_iter: int = 10000, random_state: int = 42) -> LinearSVC:
-    return LinearSVC(C=C, dual=False, max_iter=max_iter, random_state=random_state, tol=1e-7)
+def make_linear_svm(C: float = 0.0001, max_iter: int = 20000, random_state: int = 42) -> LinearSVC:
+    return LinearSVC(C=C, dual=False, max_iter=max_iter, random_state=random_state, tol=1e-5)
 
 
 
@@ -138,6 +138,30 @@ def extract_linear_weights_general(estimator):
     if hasattr(estimator, "coef_"):
         return np.asarray(estimator.coef_).ravel()
     return None
+
+
+def extract_linear_weights_and_bias(estimator):
+    """
+    Like extract_linear_weights_general, but also returns the intercept (bias).
+    Returns (w, b) where w is a 1D weight vector and b is a float.
+    Returns (None, None) if no linear coef_/intercept_ found.
+    """
+    # Pipeline case
+    if hasattr(estimator, "named_steps"):
+        for step in estimator.named_steps.values():
+            if hasattr(step, "coef_") and hasattr(step, "intercept_"):
+                w = np.asarray(step.coef_).ravel()
+                b = float(np.asarray(step.intercept_).ravel()[0])
+                return w, b
+        return None, None
+    # Plain estimator
+    if hasattr(estimator, "coef_") and hasattr(estimator, "intercept_"):
+        w = np.asarray(estimator.coef_).ravel()
+        b = float(np.asarray(estimator.intercept_).ravel()[0])
+        return w, b
+    return None, None
+
+
 
 
 # ------------------------------

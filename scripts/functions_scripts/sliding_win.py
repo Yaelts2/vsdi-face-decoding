@@ -58,10 +58,16 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
     trial_acc_mean, trial_acc_std = [], []
     w_mean_windows = []
     w_sem_windows = []  
+    final_weights = []
+    final_intercept = []
+    final_models = []
 
     # optional storage
     fold_frame_acc = []
     fold_trial_acc = []
+    oof_trial_score_windows = []
+    fold_models_all = []
+
     fold_weights_all = [] if return_fold_weights else None
     # Loop over sliding windows
     for start in range(start_frame, last_start + 1, step):
@@ -82,10 +88,21 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
         y_frames = y_frames[sort_order]
         groups   = groups[sort_order]
 
+        oof_score_window = np.full(n_trials, np.nan)
+        fold_models_window = []
+        
         for tr_idx, te_idx in deterministic_group_kfold(groups, n_splits):
             clf = make_estimator()
             clf.fit(X_frames[tr_idx], y_frames[tr_idx])
+            fold_models_window.append(clf)
             y_pred = clf.predict(X_frames[te_idx])
+            scores = clf.decision_function(X_frames[te_idx])
+            te_groups = groups[te_idx]
+            unique_trials_fold = np.unique(te_groups)
+            
+
+            for trial_id in unique_trials_fold:
+                oof_score_window[int(trial_id)] = scores[te_groups == trial_id].mean()
 
             # (1) frame-level accuracy
             acc_f = accuracy_score(y_frames[te_idx], y_pred)
@@ -103,13 +120,17 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
             if w is None:
                 raise ValueError("Estimator does not expose linear weights (coef_).")
             W_folds.append(w)
-
+            
+        fold_models_all.append(fold_models_window)
         W_folds = np.vstack(W_folds)  # (n_folds, n_features)
         centers.append(center)
         frame_acc_mean.append(float(np.mean(fold_acc_f)))
         frame_acc_std.append(np.std(fold_acc_f))
         trial_acc_mean.append(float(np.mean(fold_acc_t)))
         trial_acc_std.append(np.std(fold_acc_t))
+        if np.any(np.isnan(oof_score_window)):
+            raise ValueError("Some trials never appeared in a test fold — check deterministic_group_kfold coverage.")
+        oof_trial_score_windows.append(oof_score_window)
 
         w_mean_windows.append(np.mean(W_folds, axis=0))
         w_sem_windows.append(np.std(W_folds, axis=0, ddof=1) if W_folds.shape[0] > 1 else np.full(W_folds.shape[1], np.nan))
@@ -118,6 +139,15 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
         fold_trial_acc.append(fold_acc_t)
         if return_fold_weights:
             fold_weights_all.append(W_folds)
+        clf_final = make_estimator()
+        clf_final.fit(X_frames, y_frames)
+        w_final, b_final = cv.extract_linear_weights_and_bias(clf_final)
+        if w_final is None:
+            raise ValueError("Final estimator does not expose linear coef_/intercept_.")
+
+        final_weights.append(w_final)
+        final_intercept.append(b_final)
+        final_models.append(clf_final)
 
     out = {
         "centers": np.asarray(centers),
@@ -129,6 +159,11 @@ def sliding_window_decode_with_stats(X_pix_frames_trials,   # (pixels, frames, t
         "w_sem_windows":  np.vstack(w_sem_windows),   # (n_windows, n_features) diagnostic
         "fold_frame_acc": np.asarray(fold_frame_acc), # (n_windows, n_splits)
         "fold_trial_acc": np.asarray(fold_trial_acc), # (n_windows, n_splits)
+        "final_weights": np.vstack(final_weights),      # (n_windows, n_features)
+        "final_intercept": np.asarray(final_intercept),  # (n_windows,)
+        "final_models": final_models,       
+        "oof_trial_score": np.vstack(oof_trial_score_windows),  # (n_windows, n_trials), held-out per correct trial
+        "fold_models_all": fold_models_all,
         "params": {
             "window_size": window_size,
             "start_frame": start_frame,

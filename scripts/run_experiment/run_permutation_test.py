@@ -32,9 +32,9 @@ RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
 
 # Point to the specific run folder you want to test (the folder that contains config.json/result.npz/ROI_mask.npz)
 # Example:
-RUN_DIR = RESULTS_ROOT / "fixed_window__frame32-40__SVM_10fold__2026-02-18_17-43-53"
+RUN_DIR = RESULTS_ROOT / "fixed_window__frame32-40__SVM_10fold____2026-06-25_19-14-36"
 
-N_PERMUTATIONS = 2
+N_PERMUTATIONS = 3
 PERM_SEED = 42
 
 # Save destination root:
@@ -117,11 +117,11 @@ perm_result = mc.run_permutation_nested_cv(X_frames, y_trials, groups,
 real_acc = float(real_nested["outer_acc_trial_mean"])
 shuffled_accs = perm_result["shuffled_scores_trials"]
 
-stats_trial = mc.permutation_significance_test_fixed(real_acc, shuffled_accs, one_tailed=True)
+stats_trial = mc.permutation_significance_test_fixed(real_acc, shuffled_accs, one_tailed=False)
 
 print("\n=== Permutation significance (TRIAL level) ===")
 print(f"Real trial acc: {real_acc:.4f}")
-print(f"P-value (one-tailed): {stats_trial['p_value']:.4f}")
+print(f"P-value (two-tailed): {stats_trial['p_value']:.4f}")
 print("PASS (alpha=0.05):", stats_trial["pass"])
 
 # 5) Save permutation run outputs 
@@ -164,8 +164,8 @@ np.savez_compressed(
     shuffled_trial_min=float(stats_trial["shuffled_min"]),
     shuffled_trial_max=float(stats_trial["shuffled_max"]),
     # significance (trial)
-    p_value_trial_two_tailed=float(stats_trial["p_value_two_tailed"]),
-    pass_alpha_0p05_trial=bool(stats_trial["pass_alpha_0p05"]),
+    p_value_trial_two_tailed=float(stats_trial["p_value"]),
+    pass_alpha_0p05_trial=bool(stats_trial["pass"]),
 )
 
 print("Saved permutation results to:")

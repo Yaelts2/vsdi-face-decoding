@@ -18,6 +18,7 @@ from scripts.functions_scripts import ml_cv as cv
 from scripts.functions_scripts import ml_plots as pl
 from scripts.functions_scripts import sliding_win as sw
 from scripts.functions_scripts.save_results import save_experiment
+from scripts.functions_scripts import feature_extraction as fe
 ourCmap = pre.green_gray_magenta()
 
 
@@ -29,15 +30,15 @@ ourCmap = pre.green_gray_magenta()
 # =========================
 
 # Data files:
-face_file= "condsXn2_110209d.npy"
-nonface_file= "condsXn4_110209d.npy"
+face_file= "condsXn2_030209f.npy"
+nonface_file= "condsXn4_030209f.npy"
 data_dir= "data/processed/condsXn/"
 
 # Preprocessing:
 Baseline_frames_zscore= (1, 24)
 
 # Feature extraction:
-ROI_mask_path= "data/processed/ROI_mask2.npy"
+ROI_mask_path= "data/processed/ROI_030209all_mask.npy"
 
 # Model :
 SEED = 42
@@ -98,6 +99,40 @@ results = sw.sliding_window_decode_with_stats(X_roi,      # shape: (8518, 256, 5
                                             stop_frame,
                                             step,
                                             n_splits)
+results["zscore_std_pooled"] = std
+
+# Checking the model
+peak_idx = results["trial_acc_mean"].argmax()
+clf_final = results["final_models"][peak_idx]
+w = results["final_weights"][peak_idx]
+b = results["final_intercept"][peak_idx]
+
+# Recompute X_frames for that same window (same slicing as inside the function)
+start = start_frame + peak_idx * step
+end = start + window_size
+X_win = X_roi[:, start:end, :]
+X_frames_check, y_frames_check, groups_check = fe.frames_as_samples(
+    X_win, y_trials, trial_axis=2, frame_axis=1, pixel_axis=0
+)
+
+# Manual decision score vs. sklearn's own decision_function
+manual_score = X_frames_check @ w + b
+sklearn_score = clf_final.decision_function(X_frames_check)
+
+print("Max abs difference (scores):", np.max(np.abs(manual_score - sklearn_score)))
+
+# Predicted labels should match exactly
+manual_pred = (manual_score > 0).astype(int)  # careful: see class order check below
+sklearn_pred = clf_final.predict(X_frames_check)
+print("Predictions match:", np.array_equal(manual_pred, sklearn_pred) or 
+    np.array_equal(1 - manual_pred, sklearn_pred))
+
+print("Class order (classes_):", clf_final.classes_)
+print("Number of fold models at window 32:", len(results["fold_models_all"][32]))
+
+
+
+
 
 # --- Plot results ---
 sw.plot_sliding_window_accuracy_with_std(res=results,
@@ -133,7 +168,7 @@ dataset_info.update({"face_file": face_file,
 
 run_dir = save_experiment(results_root=results_root,
                         experiment="sliding_window",
-                        experiment_tag=f"110209d15_frame{start_frame}-{stop_frame}__SVM_{n_splits}foldCV",
+                        experiment_tag=f"030209f24_frame{start_frame}-{stop_frame}__SVM_{n_splits}foldCV",
                         results=results,
                         ROI_mask_path=ROI_mask_path,
                         dataset_info=dataset_info)
