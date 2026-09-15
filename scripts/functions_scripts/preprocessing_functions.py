@@ -204,7 +204,7 @@ print("y shape:", y.shape)
 
 
 
-def zscore_dataset_pixelwise_trials(X, baseline_frames=(0, 24), eps: float = 1e-8, ddof: int = 0):
+def zscore_dataset_pixelwise_trials(X, baseline_frames=(1, 24), eps: float = 1e-8, ddof: int = 0):
     """
     Updated Pixel-wise Z-score:
     1. Subtract trial-specific baseline mean from each trial.

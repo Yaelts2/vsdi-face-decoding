@@ -1,10 +1,10 @@
 """
-test_errorTrials_allareas.py
+test_errorTrials_V1.py
 
-Driver script for Aim 3, Part 2 -- ALL-CHAMBER MODELS (formerly test_errorTrials.py).
-Separated from V1/V2-specific versions so all three can be run independently
-without cache collisions. See test_errorTrials_V1.py / test_errorTrials_V2.py
-for the area-specific versions (identical structure, different run_dir/cache).
+Driver script for Aim 3, Part 2 -- V1 AREA MODELS. Identical structure to
+test_errorTrials_allareas.py / test_errorTrials_V2.py, just pointed at the
+V1-trained sliding-window decoders and a separate V1 cache.
+
 
 Loops over sessions:
   1. Loads that session's already-trained sliding-window decoder (results)
@@ -13,12 +13,15 @@ Loops over sessions:
   4. Builds grand averages across sessions (accuracy, score)
   5. Runs group-level significance tests (per-timepoint + windowed)
   6. Runs sliding-window Cohen's d (pooled, session-level) for both metrics
+  7. Runs literature-style per-session d' (Ayzenshtat et al. 2012 formula),
+     averaged across sessions
 
 Results of the (slow) per-session loop are cached to disk. Set USE_CACHE=False
 whenever you change anything UPSTREAM of the grand-average section (session
 list, process_error_trials_for_session args, MATCH_CORRECT_TO_ERROR, etc).
-Everything below the loop (stats, plotting, window choice) reruns in
-seconds regardless of the cache.
+Everything below the loop (stats, plotting, window choice, d') reruns in
+seconds regardless of the cache, since per_session_results already stores the
+full per-trial matrices needed for d'.
 """
 
 import matplotlib
@@ -46,7 +49,7 @@ print("Backend after all imports:", matplotlib.get_backend())
 # CACHE + ANALYSIS CONFIG
 # =====================================================================
 
-CACHE_PATH = Path(r"C:\project\vsdi-face-decoding\results\error_trials_cache_allareas.pkl")
+CACHE_PATH = Path(r"C:\project\vsdi-face-decoding\results\error_trials_cache_V1.pkl")
 USE_CACHE = True      # set False to force a full recompute of the per-session loop
 
 # If True, correct trials are randomly subsampled ONCE per session (before any
@@ -57,118 +60,118 @@ MATCH_CORRECT_TO_ERROR = False
 SUBSAMPLE_SEED = 42
 
 # =====================================================================
-# CONFIG -- one entry per session (all-chamber models)
+# CONFIG -- one entry per session (V1-trained decoders)
 # =====================================================================
 
 sessions = [
     {
         "tag": "110209a15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209a15_frame1-100__SVM_10foldCV____2026-07-19_12-00-22",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209a15_V1_frame1-100__SVM_10foldCV____2026-07-06_16-01-21",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209a\errorTrialsData_110209a15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "110209a24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209a24_frame1-100__SVM_10foldCV____2026-07-19_13-24-35",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209a24_V1_frame1-100__SVM_10foldCV____2026-07-06_16-04-48",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209a\errorTrialsData_110209a24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
     },
     {
         "tag": "110209b15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209b15_frame1-100__SVM_10foldCV____2026-07-19_13-44-39",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209b15_V1_frame1-100__SVM_10foldCV____2026-07-06_16-08-43",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209b\errorTrialsData_110209b15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "110209b24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209b24_frame1-100__SVM_10foldCV____2026-07-20_11-30-27",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209b24_V1_frame1-100__SVM_10foldCV____2026-07-06_16-12-34",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209b\errorTrialsData_110209b24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
     },
     {
         "tag": "110209c15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209c15_frame1-100__SVM_10foldCV____2026-07-20_11-42-35",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209c15_V1_frame1-100__SVM_10foldCV____2026-07-06_16-16-13",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209c\errorTrialsData_110209c15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "110209c24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209c24_frame1-100__SVM_10foldCV____2026-07-20_11-54-00",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209c24_V1_frame1-100__SVM_10foldCV____2026-07-06_16-19-36",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209c\errorTrialsData_110209c24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
     },
     {
         "tag": "110209d15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209d15_frame1-100__SVM_10foldCV____2026-07-20_15-33-10",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209d15_V1_frame1-100__SVM_10foldCV____2026-07-06_16-22-19",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209d\errorTrialsData_110209d15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "110209d24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__110209d24_frame1-100__SVM_10foldCV____2026-07-26_10-19-07",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__110209d24_V1_frame1-100__SVM_10foldCV____2026-07-06_16-25-14",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\110209d\errorTrialsData_110209d24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
     },
     {
         "tag": "030209a15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209a15_frame1-100__SVM_10foldCV____2026-07-26_12-08-59",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209a15_V1_frame1-100__SVM_10foldCV____2026-07-07_12-39-43",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209a\errorTrialsData_030209a15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "030209a24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209a24_frame1-100__SVM_10foldCV____2026-07-26_12-16-43",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209a24_V1_frame1-100__SVM_10foldCV____2026-07-07_12-42-49",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209a\errorTrialsData_030209a24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
     },
     {
         "tag": "030209c15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209c15_frame1-100__SVM_10foldCV____2026-07-26_12-42-22",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209c15_V1_frame1-100__SVM_10foldCV____2026-07-07_12-46-14",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209c\errorTrialsData_030209c15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "030209c24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209c24_frame1-100__SVM_10foldCV____2026-07-26_12-34-26",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209c24_V1_frame1-100__SVM_10foldCV____2026-07-07_12-49-17",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209c\errorTrialsData_030209c24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
     },
     {
         "tag": "030209e15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209e15_frame1-100__SVM_10foldCV____2026-07-26_12-51-26",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209e15_V1_frame1-100__SVM_10foldCV____2026-07-07_12-52-41",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209e\errorTrialsData_030209e15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "030209e24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209e24_frame1-100__SVM_10foldCV____2026-07-26_13-49-07",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209e24_V1_frame1-100__SVM_10foldCV____2026-07-07_12-55-49",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209e\errorTrialsData_030209e24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
     },
     {
         "tag": "030209f15",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209f15_frame1-100__SVM_10foldCV____2026-07-27_10-41-55",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209f15_V1_frame1-100__SVM_10foldCV____2026-07-07_12-59-16",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209f\errorTrialsData_030209f15.mat",
         "face_cond": 1,
         "nonface_cond": 5,
     },
     {
         "tag": "030209f24",
-        "run_dir": r"C:\project\vsdi-face-decoding\results\allareas\sliding_window__030209f24_frame1-100__SVM_10foldCV____2026-07-27_11-01-09",
+        "run_dir": r"C:\project\vsdi-face-decoding\results\V1\sliding_window__030209f24_V1_frame1-100__SVM_10foldCV____2026-07-07_13-03-09",
         "error_mat": r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\error trials\030209f\errorTrialsData_030209f24.mat",
         "face_cond": 2,
         "nonface_cond": 4,
@@ -262,13 +265,14 @@ if len(error_acc_list) > 0:
         n_sig = sig_results[comp]['sig_mask'].sum()
         n_valid = (~np.isnan(sig_results[comp]['p_raw'])).sum()
         print(f"[ACC] {comp}: {n_sig} significant out of {n_valid} valid timepoints")
+        print(f"  min p_fdr = {np.nanmin(sig_results[comp]['p_fdr'])}")
 
     etf.add_significance_markers(ax, sig_results, comparisons=('correct_vs_error', 'correct_vs_chance', 'error_vs_chance'))
 
     # ---- windowed test: gap before phase 2 (session-mean based, with built-in plot) ----
     window_result_acc = etf.test_window_average(
         correct_acc_list, error_acc_list, centers_ref, window=(38, 45), null_value=0.5,
-        label="accuracy", session_names=session_names, area_label=None, ylabel="Accuracy")
+        label="accuracy", session_names=session_names, area_label="V1", ylabel="Accuracy")
 
     # =====================================================================
     # GRAND AVERAGE + STATS -- SCORE
@@ -277,7 +281,7 @@ if len(error_acc_list) > 0:
         correct_score_list, error_score_list, session_names, centers_ref, metric_name="score")
     fig2, ax2 = etf.plot_grand_average_metric(
         grand_score_results, ylabel="Mean score (+ = matches own true label)",
-        title=f"Grand average across {grand_score_results['n_sessions']} sessions: correct vs. error label-consistent score",
+        title=f"Grand average across {grand_score_results['n_sessions']} sessions: correct vs. error label-consistent score (V1)",
         ref_line=0, ref_label="Decision boundary (0)")
 
     sig_score_results = etf.run_group_significance_tests(
@@ -294,23 +298,53 @@ if len(error_acc_list) > 0:
     # ---- windowed test: gap before phase 2 (session-mean based, with built-in plot) ----
     window_result_score = etf.test_window_average(
         correct_score_list, error_score_list, centers_ref, window=(38, 45), null_value=0.0,
-        label="score", session_names=session_names, area_label=None, ylabel="Score")
+        label="score", session_names=session_names, area_label="V1", ylabel="Score")
 
     # =====================================================================
     # SLIDING-WINDOW COHEN'S D (pooled, session-level) -- ACCURACY & SCORE
     # =====================================================================
     sliding_d_acc = etf.sliding_window_effect_size(correct_acc_list, error_acc_list, centers_ref,
                                                      window_width=16, method="pooled")
-    etf.plot_sliding_window_effect_size(sliding_d_acc, area_label="Accuracy")
+    etf.plot_sliding_window_effect_size(sliding_d_acc, area_label="Accuracy (V1)")
 
     sliding_d_score = etf.sliding_window_effect_size(correct_score_list, error_score_list, centers_ref,
                                                        window_width=16, method="pooled")
-    etf.plot_sliding_window_effect_size(sliding_d_score, area_label="Score")
+    etf.plot_sliding_window_effect_size(sliding_d_score, area_label="Score (V1)")
+
+    # =====================================================================
+    # LITERATURE-STYLE PER-SESSION D' (Ayzenshtat et al. 2012 formula)
+    # d'(w) = (mean(correct) - mean(error)) / std(error)  -- computed PER
+    # SESSION from the per-trial values, then averaged across sessions
+    # (mean +/- SD), matching how the paper itself reports its group result.
+    # Uses the per-trial matrices already stored in per_session_results, so
+    # no cache rebuild is needed unless MATCH_CORRECT_TO_ERROR changed.
+    # =====================================================================
+    dprime_acc_list = [
+        etf.compute_dprime_literature(
+            per_session_results[tag]["acc_results"]["correct_trial_values"],
+            per_session_results[tag]["acc_results"]["error_trial_values"])
+        for tag in session_names
+    ]
+    agg_dprime_acc = etf.aggregate_dprime_across_sessions(dprime_acc_list, session_names, centers_ref)
+    etf.plot_dprime_across_sessions(agg_dprime_acc, area_label="Accuracy (V1)")
+    print(f"[D-PRIME lit, accuracy] mean +/- SD across {agg_dprime_acc['n_sessions']} sessions "
+          f"at peak: {np.nanmax(agg_dprime_acc['mean']):.3f} "
+          f"+/- {agg_dprime_acc['sd'][np.nanargmax(agg_dprime_acc['mean'])]:.3f}")
+
+    dprime_score_list = [
+        etf.compute_dprime_literature(
+            per_session_results[tag]["score_results"]["correct_trial_values"],
+            per_session_results[tag]["score_results"]["error_trial_values"])
+        for tag in session_names
+    ]
+    agg_dprime_score = etf.aggregate_dprime_across_sessions(dprime_score_list, session_names, centers_ref)
+    etf.plot_dprime_across_sessions(agg_dprime_score, area_label="Score (V1)")
+    print(f"[D-PRIME lit, score] mean +/- SD across {agg_dprime_score['n_sessions']} sessions "
+          f"at peak: {np.nanmax(agg_dprime_score['mean']):.3f} "
+          f"+/- {agg_dprime_score['sd'][np.nanargmax(agg_dprime_score['mean'])]:.3f}")
 
 else:
     print("No sessions processed -- nothing to grand-average.")
 
 # keep all figures open until you're done looking
 plt.show(block=True)
-
-

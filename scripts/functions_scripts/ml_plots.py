@@ -166,15 +166,24 @@ def plot_superpixel_traces(data,xs = None,ys = None, nsubplots= 4,*,
 
 #example usage
 '''
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn4_030209c.npy")
 x_avg = x.mean(axis=2)
 x_avg_frames =  x_avg[:, 2:75]
 frame_ids = list(range(2, 75))     # 25..80 (56 frames)
 binned, fig, axes, cid =plot_superpixel_traces(x_avg_frames-1, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
 plt.show()
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn4_030209f.npy")
+x_avg = x.mean(axis=2)
+x_avg_frames =  x_avg[:, 2:75]
+frame_ids = list(range(2, 75))     # 25..80 (56 frames)
+binned, fig, axes, cid =plot_superpixel_traces(x_avg_frames-1, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
+
+
+
+
+
+
 '''
-
-
 
 def avg_consecutive_frames_with_ms_labels(X, frame_ids, avg_n=2, dt_ms=10, zero_frame=27):
     """

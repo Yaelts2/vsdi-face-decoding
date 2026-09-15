@@ -196,18 +196,34 @@ def load_data_from_config(config):
     """
     Load and prepare dataset exactly like training:
     1) build X_trials, y_trials
-    2) z-score pixelwise across trials (using baseline frames from config)
+    2) z-score pixelwise across trials
+
+    Handles TWO cases, distinguished by config["baseline_source"]:
+
+    A) Regular / stim-aligned configs (baseline_source absent, i.e. every
+       config saved before the RT-aligned baseline fix, and any future
+       stim-aligned run): baseline frames are taken directly from
+       config["zscore_baseline_frames"] and applied to X_trials itself,
+       via pre.zscore_dataset_pixelwise_trials -- exactly as before.
+
+    B) RT-aligned configs (baseline_source == "stim_aligned_per_trial",
+       saved by the corrected run_sliding_window_RT.py): X_trials has no
+       true pre-stimulus period of its own (it's cut around the reaction
+       time), so the per-trial baseline mean instead comes from that same
+       trial's stimulus-aligned data (config["baseline_face_file_stim"] /
+       "baseline_nonface_file_stim" / "baseline_data_dir_stim" /
+       "zscore_baseline_frames_stim"). This mirrors
+       zscore_RT_with_stim_baseline in run_sliding_window_RT.py exactly,
+       so a model's saved config always reproduces the same data it was
+       actually trained on.
+
     Returns:
         X_trials_z, y_trials
     """
-    # --- paths / files ---
+    # --- paths / files (the data actually being loaded/decoded) ---
     data_dir = config["data_dir"]
     face_file = config["face_file"]
     nonface_file = config["nonface_file"]
-
-    # --- baseline frames for z-score ---
-    # Accept either "Baseline_frames_zscore" or "baseline_frames_zscore"
-    baseline = config.get("zscore_baseline_frames")
 
     # 1) build dataset
     X_trials, y_trials, dataset_info = pre.build_X_y(
@@ -215,15 +231,57 @@ def load_data_from_config(config):
         nonface_file=nonface_file,
         data_dir=data_dir
     )
-    
-    # 2) z-score across all trials (pixelwise)
-    X_z, mean, std = pre.zscore_dataset_pixelwise_trials(X_trials, baseline)
-    '''
-    x_avg_frames =  X_z[:, 25:75,0:27]
-    x_avg_frames = np.nanmean(x_avg_frames,axis=2)
-    frame_ids = list(range(25, 75))     # 25..80 (56 frames)
-    binned, fig, axes, cid =pl.plot_superpixel_traces(x_avg_frames, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
-    plt.show()
-    '''
-    return X_z, y_trials
 
+    baseline_source = config.get("baseline_source")
+
+    if baseline_source == "stim_aligned_per_trial":
+        # --- RT-aligned case: baseline comes from the matching stim-aligned trial ---
+        face_file_stim = config["baseline_face_file_stim"]
+        nonface_file_stim = config["baseline_nonface_file_stim"]
+        data_dir_stim = config["baseline_data_dir_stim"]
+        baseline_frames_stim = tuple(config["zscore_baseline_frames_stim"])
+
+        X_stim_trials, y_stim_trials, _ = pre.build_X_y(
+            face_file=face_file_stim,
+            nonface_file=nonface_file_stim,
+            data_dir=data_dir_stim
+        )
+
+        if X_stim_trials.shape[-1] != X_trials.shape[-1]:
+            raise ValueError(
+                f"Trial count mismatch reloading RT-aligned data: RT-aligned "
+                f"({face_file}/{nonface_file}) has {X_trials.shape[-1]} trials, "
+                f"stim-aligned baseline source ({face_file_stim}/{nonface_file_stim}) "
+                f"has {X_stim_trials.shape[-1]} trials. Cannot apply per-trial "
+                f"baseline with mismatched trial counts."
+            )
+        if not np.array_equal(y_stim_trials, y_trials):
+            print("WARNING: label vectors from RT-aligned and stim-aligned baseline "
+                  "data differ even though trial counts match -- positional trial "
+                  "matching may be WRONG here. Double-check before trusting this reload.")
+
+        b0, b1 = baseline_frames_stim
+        baseline = X_stim_trials[:, b0:b1, :]          # (pixels, baseline_frames, trials)
+        mean = np.nanmean(baseline, axis=1)            # (pixels, trials)
+        std = np.nanstd(baseline, axis=1)               # (pixels, trials)
+        n_zero_std = np.sum(std == 0)
+        if n_zero_std > 0:
+            print(f"WARNING: {n_zero_std} (pixel, trial) baseline std values are exactly 0 "
+                  f"-- these will become NaN after division.")
+        std_safe = np.where(std == 0, np.nan, std)
+
+        X_z = (X_trials - mean[:, None, :]) / std_safe[:, None, :]
+
+    else:
+        # --- regular / stim-aligned case: unchanged from before ---
+        baseline = config.get("zscore_baseline_frames")
+        X_z, mean, std = pre.zscore_dataset_pixelwise_trials(X_trials, baseline)
+        '''
+        x_avg_frames =  X_z[:, 25:75,0:27]
+        x_avg_frames = np.nanmean(x_avg_frames,axis=2)
+        frame_ids = list(range(25, 75))     # 25..80 (56 frames)
+        binned, fig, axes, cid =pl.plot_superpixel_traces(x_avg_frames, xs=100, ys=100, nsubplots=5,overlay=False, frames=frame_ids )
+        plt.show()
+        '''
+
+    return X_z, y_trials

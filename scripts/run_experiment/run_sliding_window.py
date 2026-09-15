@@ -30,7 +30,7 @@ ourCmap = pre.green_gray_magenta()
 # =========================
 
 # Data files:
-face_file= "condsXn2_030209f.npy"
+face_file= "condsXn4_030209c.npy"
 nonface_file= "condsXn4_030209f.npy"
 data_dir= "data/processed/condsXn/"
 
@@ -38,7 +38,7 @@ data_dir= "data/processed/condsXn/"
 Baseline_frames_zscore= (1, 24)
 
 # Feature extraction:
-ROI_mask_path= "data/processed/ROI_030209all_mask.npy"
+ROI_mask_path= "data/processed/ROI_110209a_allA.npy"
 
 # Model :
 SEED = 42
@@ -168,7 +168,7 @@ dataset_info.update({"face_file": face_file,
 
 run_dir = save_experiment(results_root=results_root,
                         experiment="sliding_window",
-                        experiment_tag=f"030209f24_frame{start_frame}-{stop_frame}__SVM_{n_splits}foldCV",
+                        experiment_tag=f"shuffleVsPs15_frame{start_frame}-{stop_frame}__SVM_{n_splits}foldCV",
                         results=results,
                         ROI_mask_path=ROI_mask_path,
                         dataset_info=dataset_info)

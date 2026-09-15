@@ -1,9 +1,10 @@
 """
 Method B, proof of concept — single session: 110209_a_1,5
 
-Question: within phase 1 (0-80ms post-stimulus), does each trial's own V1
-time-course look like a time-shifted copy of that SAME trial's own V2
-time-course?
+Question: within each phase, does each trial's own V1 time-course look like
+a time-shifted copy of that SAME trial's own V2 time-course?
+    phase 1: 0-130ms post-stimulus (feedforward-dominant)
+    phase 2: 130-250ms post-stimulus (feedback-dominant)
 
 Sign convention (same as Method A):
     positive lag L  ->  V1 sampled at (t + L)  ->  V2 leads V1
@@ -15,11 +16,11 @@ exact same `centers` / `time_ms` array for a given pair. A lag in ms is
 therefore just an integer shift in array-index units (10ms per step) --
 no nearest-neighbor snapping or tolerance matching needed anywhere.
 
-Pipeline:
+Pipeline (run once per phase, using the SAME loaded oof_trial_score):
     1. Load V1 + V2 oof_trial_score and centers for this pair.
     2. Convert centers -> time_ms (zero_frame=27, frame_duration_ms=10) and
        confirm V1/V2 time_ms are identical (sanity check).
-    3. Find the V2 window-indices for phase 1 (0-80ms).
+    3. Find the V2 window-indices for this phase.
     4. For each lag (integer number of 10ms steps), shift those indices to
        get the matching V1 window-indices. Drop a lag only if the shift
        pushes an index outside [0, n_windows-1].
@@ -28,9 +29,10 @@ Pipeline:
     6. Average r across trials -> one correlation-vs-lag curve.
     7. Flag if the curve is nearly flat across lags (best lag not
        meaningfully distinguishable from its neighbors).
-    8. Figures: (A) grand-average V1/V2 time courses with phase-1 window
-       highlighted, (B) per-lag overlay grid showing exactly what's being
-       correlated at each lag, (C) the main lag-vs-correlation curve.
+    8. Figures: (A) grand-average V1/V2 time courses with BOTH phase
+       windows highlighted, (B) per-lag overlay grid per phase (two
+       figures), (C) main lag-vs-correlation curves for both phases as
+       side-by-side subplots in one figure.
 """
 
 import json
@@ -50,6 +52,9 @@ FRAME_DURATION_MS = 10
 PHASE1_T_START = 0
 PHASE1_T_STOP = 130
 
+PHASE2_T_START = 130
+PHASE2_T_STOP = 250
+
 LAG_MIN = -50
 LAG_MAX = 50
 LAG_STEP = 10  # must be a multiple of FRAME_DURATION_MS
@@ -59,9 +64,9 @@ FLATNESS_RANGE_THRESHOLD = 0.05  # if max(r) - min(r) across lags < this, flag i
 V1_DIR = Path(r"C:\project\vsdi-face-decoding\results\V1")
 V2_DIR = Path(r"C:\project\vsdi-face-decoding\results\V2")
 
-PAIR_KEY = "110209_a_1,5"
-V1_FOLDER_HINT = "110209a15_V1"
-V2_FOLDER_HINT = "110209a15_V2"
+PAIR_KEY = "030209_f_2,4"
+V1_FOLDER_HINT = "030209f24_V1"
+V2_FOLDER_HINT = "030209f24_V2"
 
 
 # ---------------------------------------------------------------------------
@@ -192,38 +197,58 @@ if __name__ == "__main__":
     print(f"Shared time range: {time_ms.min():.0f} to {time_ms.max():.0f} ms "
           f"({n_windows} windows, {FRAME_DURATION_MS}ms/step)")
 
-    ref_idx = get_phase_indices(time_ms, PHASE1_T_START, PHASE1_T_STOP)
-    ref_times = time_ms[ref_idx]
-    print(f"Phase-1 reference timepoints (ms): {ref_times}  ({len(ref_idx)} points)")
-
-    lags, mean_r, per_trial_r, v1_idx_by_lag = compute_lag_curve(
-        v1_scores, v2_scores, n_windows, ref_idx, LAG_MIN, LAG_MAX, LAG_STEP,
-    )
-
-    print(f"\n{'lag (ms)':>10} {'mean r':>10}")
-    for lag, r in zip(lags, mean_r):
-        marker = "  <-- max" if r == np.nanmax(mean_r) else ""
-        print(f"{lag:>10} {r:>10.4f}{marker}")
-
-    best_lag = lags[np.nanargmax(mean_r)]
-    r_range = np.nanmax(mean_r) - np.nanmin(mean_r)
-    print(f"\nBest lag: {best_lag:+d} ms "
-          f"({'V2 leads V1' if best_lag > 0 else 'V1 leads V2' if best_lag < 0 else 'no lead'})")
-    print(f"Curve range (max-min r across lags): {r_range:.4f}")
-    if r_range < FLATNESS_RANGE_THRESHOLD:
-        print(f"*** FLAG: curve is nearly flat (range < {FLATNESS_RANGE_THRESHOLD}) "
-              f"-- best lag is not clearly distinguishable from neighboring lags. ***")
-
-    # -----------------------------------------------------------------
-    # Figure A: grand-average V1/V2 time courses, phase-1 window shaded
-    # -----------------------------------------------------------------
     v1_evidence = v1_scores * true_label[np.newaxis, :]  # (n_windows, n_trials)
     v2_evidence = v2_scores * true_label[np.newaxis, :]
 
+    # ---------------------------------------------------------------
+    # Run Method B for phase 1 and phase 2, on the SAME loaded scores
+    # ---------------------------------------------------------------
+    phases = [
+        ("phase 1", PHASE1_T_START, PHASE1_T_STOP),
+        ("phase 2", PHASE2_T_START, PHASE2_T_STOP),
+    ]
+    phase_results = {}
+
+    for phase_name, t_start, t_stop in phases:
+        ref_idx = get_phase_indices(time_ms, t_start, t_stop)
+        ref_times = time_ms[ref_idx]
+        print(f"\n{phase_name} ({t_start}-{t_stop}ms) reference timepoints (ms): "
+              f"{ref_times}  ({len(ref_idx)} points)")
+
+        lags, mean_r, per_trial_r, v1_idx_by_lag = compute_lag_curve(
+            v1_scores, v2_scores, n_windows, ref_idx, LAG_MIN, LAG_MAX, LAG_STEP,
+        )
+
+        print(f"{'lag (ms)':>10} {'mean r':>10}")
+        for lag, r in zip(lags, mean_r):
+            marker = "  <-- max" if r == np.nanmax(mean_r) else ""
+            print(f"{lag:>10} {r:>10.4f}{marker}")
+
+        best_lag = lags[np.nanargmax(mean_r)]
+        r_range = np.nanmax(mean_r) - np.nanmin(mean_r)
+        print(f"{phase_name}: best lag = {best_lag:+d} ms "
+              f"({'V2 leads V1' if best_lag > 0 else 'V1 leads V2' if best_lag < 0 else 'no lead'})")
+        print(f"{phase_name}: curve range (max-min r across lags): {r_range:.4f}")
+        if r_range < FLATNESS_RANGE_THRESHOLD:
+            print(f"*** FLAG ({phase_name}): curve is nearly flat (range < {FLATNESS_RANGE_THRESHOLD}) "
+                  f"-- best lag is not clearly distinguishable from neighboring lags. ***")
+
+        phase_results[phase_name] = {
+            "t_start": t_start, "t_stop": t_stop,
+            "ref_idx": ref_idx, "ref_times": ref_times,
+            "lags": lags, "mean_r": mean_r,
+            "per_trial_r": per_trial_r, "v1_idx_by_lag": v1_idx_by_lag,
+            "best_lag": best_lag, "r_range": r_range,
+        }
+
+    # -----------------------------------------------------------------
+    # Figure A: grand-average V1/V2 time courses, BOTH phase windows shaded
+    # -----------------------------------------------------------------
     figA, axA = plt.subplots(figsize=(9, 4))
     axA.plot(time_ms, v1_evidence.mean(axis=1), label="V1 (grand avg, evidence toward correct class)", color="tab:blue")
     axA.plot(time_ms, v2_evidence.mean(axis=1), label="V2 (grand avg, evidence toward correct class)", color="tab:orange")
     axA.axvspan(PHASE1_T_START, PHASE1_T_STOP, color="gray", alpha=0.15, label="phase 1 window")
+    axA.axvspan(PHASE2_T_START, PHASE2_T_STOP, color="purple", alpha=0.10, label="phase 2 window")
     axA.axhline(0, color="black", linewidth=0.5)
     axA.set_xlabel("time (ms)")
     axA.set_ylabel("mean (score x true_label)\n[>0 = correct-direction confidence]")
@@ -232,56 +257,59 @@ if __name__ == "__main__":
     figA.tight_layout()
 
     # -----------------------------------------------------------------
-    # Figure B: per-lag overlay grid -- exactly what's being correlated
-    # trial-averaged V2 reference points vs. trial-averaged V1 shifted points
+    # Figure B: per-lag overlay grid -- one figure PER PHASE
     # -----------------------------------------------------------------
-    n_lags_shown = len(lags)
-    ncols = 4
-    nrows = int(np.ceil(n_lags_shown / ncols))
-    figB, axesB = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3 * nrows), sharey=True)
-    axesB = np.atleast_1d(axesB).flatten()
-    # NOTE: this panel plots (score x true_label), averaged across trials,
-    # purely so face/nonface trials don't cancel each other in the visual.
-    # The correlation number in each subplot title is computed on RAW
-    # per-trial scores (unaffected by sign, as established) -- only the
-    # plotted curves themselves are sign-adjusted.
-    v2_ref_mean = v2_evidence[ref_idx, :].mean(axis=1)
-    for i, lag in enumerate(lags):
-        ax = axesB[i]
-        v1_idx = v1_idx_by_lag[lag]
-        v1_shifted_mean = v1_evidence[v1_idx, :].mean(axis=1)
-        ax.plot(ref_times, v2_ref_mean, "o-", color="tab:orange", label="V2(t)")
-        ax.plot(ref_times, v1_shifted_mean, "o-", color="tab:blue", label=f"V1(t{lag:+d})")
-        title_color = "red" if lag == best_lag else "black"
-        title_suffix = "  <-- BEST" if lag == best_lag else ""
-        ax.set_title(f"lag={lag:+d}ms, r={mean_r[i]:.3f}{title_suffix}", fontsize=10, color=title_color)
-        ax.axhline(0, color="black", linewidth=0.5)
-        if lag == best_lag:
-            for spine in ax.spines.values():
-                spine.set_edgecolor("red")
-                spine.set_linewidth(2.5)
-        if i == 0:
-            ax.legend(fontsize=8)
-    for j in range(n_lags_shown, len(axesB)):
-        axesB[j].axis("off")
-    figB.suptitle(f"Method B alignment per lag (trial-avg, evidence toward correct class) — {PAIR_KEY}")
-    figB.tight_layout()
+    for phase_name, t_start, t_stop in phases:
+        res = phase_results[phase_name]
+        lags, mean_r = res["lags"], res["mean_r"]
+        ref_idx, ref_times = res["ref_idx"], res["ref_times"]
+        v1_idx_by_lag, best_lag = res["v1_idx_by_lag"], res["best_lag"]
+
+        n_lags_shown = len(lags)
+        ncols = 4
+        nrows = int(np.ceil(n_lags_shown / ncols))
+        figB, axesB = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3 * nrows), sharey=True)
+        axesB = np.atleast_1d(axesB).flatten()
+        v2_ref_mean = v2_evidence[ref_idx, :].mean(axis=1)
+        for i, lag in enumerate(lags):
+            ax = axesB[i]
+            v1_idx = v1_idx_by_lag[lag]
+            v1_shifted_mean = v1_evidence[v1_idx, :].mean(axis=1)
+            ax.plot(ref_times, v2_ref_mean, "o-", color="tab:orange", label="V2(t)")
+            ax.plot(ref_times, v1_shifted_mean, "o-", color="tab:blue", label=f"V1(t{lag:+d})")
+            title_color = "red" if lag == best_lag else "black"
+            title_suffix = "  <-- BEST" if lag == best_lag else ""
+            ax.set_title(f"lag={lag:+d}ms, r={mean_r[i]:.3f}{title_suffix}", fontsize=10, color=title_color)
+            ax.axhline(0, color="black", linewidth=0.5)
+            if lag == best_lag:
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("red")
+                    spine.set_linewidth(2.5)
+            if i == 0:
+                ax.legend(fontsize=8)
+        for j in range(n_lags_shown, len(axesB)):
+            axesB[j].axis("off")
+        figB.suptitle(f"Method B alignment per lag, {phase_name} ({t_start}-{t_stop}ms) — {PAIR_KEY}")
+        figB.tight_layout()
 
     # -----------------------------------------------------------------
-    # Figure C: main result -- mean r vs lag
+    # Figure C: main result -- mean r vs lag, BOTH phases as subplots
     # -----------------------------------------------------------------
-    figC, axC = plt.subplots(figsize=(7, 5))
-    axC.plot(lags, mean_r, marker="o")
-    axC.axvline(0, color="gray", linestyle="--", linewidth=1)
-    axC.axvline(best_lag, color="red", linestyle=":", linewidth=1.5,
-                label=f"best lag = {best_lag:+d} ms")
-    axC.set_xlabel("lag (ms)  [positive = V2 leads V1]")
-    axC.set_ylabel("mean per-trial correlation (r)")
-    title = f"Method B, phase 1 (0-80ms) — {PAIR_KEY}"
-    if r_range < FLATNESS_RANGE_THRESHOLD:
-        title += "\n(FLAGGED: curve nearly flat)"
-    axC.set_title(title)
-    axC.legend()
+    figC, axesC = plt.subplots(1, 2, figsize=(13, 5), sharey=True)
+    for ax, (phase_name, t_start, t_stop) in zip(axesC, phases):
+        res = phase_results[phase_name]
+        ax.plot(res["lags"], res["mean_r"], marker="o")
+        ax.axvline(0, color="gray", linestyle="--", linewidth=1)
+        ax.axvline(res["best_lag"], color="red", linestyle=":", linewidth=1.5,
+                   label=f"best lag = {res['best_lag']:+d} ms")
+        ax.set_xlabel("lag (ms)  [positive = V2 leads V1]")
+        title = f"{phase_name} ({t_start}-{t_stop}ms)"
+        if res["r_range"] < FLATNESS_RANGE_THRESHOLD:
+            title += "\n(FLAGGED: curve nearly flat)"
+        ax.set_title(title)
+        ax.legend()
+    axesC[0].set_ylabel("mean per-trial correlation (r)")
+    figC.suptitle(f"Method B, phase 1 vs phase 2 — {PAIR_KEY}")
     figC.tight_layout()
 
     plt.show()

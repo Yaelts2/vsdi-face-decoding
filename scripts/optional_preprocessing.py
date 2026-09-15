@@ -36,15 +36,21 @@ pre.normalize_to_clean_blank(blank_cond=BLANK_COND,
                         dtype=DTYPE,
                         eps=EPS)
 
-'''
+
 
 # Example usage of mimg function
-x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn1_110209a.npy")
+x = np.load(r"C:\project\vsdi-face-decoding\data\processed\condsXn\condsXn4_030209c.npy")
 x_avg = x.mean(axis=2)
 x_avg_frames =  x_avg[:, 32:39]
 fig,axes_flat =pl.mimg(x_avg_frames-1, xsize=100, ysize=100, low=-0.0005, high=0.002,frames=range(25,120))
 plt.show()
 
+
+
+
+
+
+'''
 # define ROI once and save mask
 x_avg_frames=np.mean(x_avg_frames,axis=1)
 ROI_mask,roi_idx=fe.creat_ROI(x_avg_frames, pixels=100)

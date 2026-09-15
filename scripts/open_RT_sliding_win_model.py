@@ -16,13 +16,22 @@ from functions_scripts import movie_function as mf
 
 ourCmap = pre.green_gray_magenta()
 ###############
-# Analysis for sliding window experiment #
+# Analysis for sliding window experiment -- RT-ALIGNED models #
 ###############
 ## user must edit these parameters for each run!##
 ### which model to load and plot results from
 
+# RT-aligned trials are cut around the reaction time (30 frames before RT,
+# 15 after), NOT around stimulus onset -- so "frame 0" (the RT event itself)
+# is at frame 30 here, not frame 27 (which is the stimulus-onset convention
+# used by the regular, non-RT pipeline). This constant is used everywhere
+# below instead of a hardcoded 27, including in the exported .mat metadata
+# that feeds the MATLAB database/plotting side -- getting this wrong there
+# would silently mislabel every downstream time axis for RT models.
+RT_ZERO_FRAME = 30
+
 results_root = Path(r"C:\project\vsdi-face-decoding\results\RTalignedModels")
-model_root = results_root  / "sliding_window_RTaligned_110209a15_RTaligned_frame1-40__SVM_10foldCV____2026-09-03_12-53-51" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root  / "sliding_window_RTaligned__030209f24_RTaligned_frame1-45__SVM_10foldCV____2026-09-03_13-58-27" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 
@@ -32,6 +41,10 @@ trials_per_cond = config_sliding_window.get("n_trials_per_class",28)
 print("Experiment config:", config_sliding_window)
 ### prepering data that was used for this experiment (e.g. for plotting weight maps, etc.)
 #load the data
+# NOTE: load_data_from_config's behavior with the NEW RT-aligned dataset_info
+# format (baseline_source / zscore_baseline_frames_stim / etc., saved by the
+# corrected run_sliding_window_RT.py) has not yet been verified -- see chat.
+# If this call errors or looks wrong, that's very likely why.
 X_trials, y_trials = sr.load_data_from_config(config_sliding_window)
 print(X_trials.shape, y_trials.shape)
 #load the ROI mask and apply it to the data
@@ -51,7 +64,7 @@ print(W_img.shape) #(pixels, frames) where frames correspond to window centers
 pl.mimg(W_img, xsize=100, ysize=100, low=-0.0002, high=0.0002, frames=results_sliding_window["centers"], colormap=ourCmap)
 frame_ids = np.arange(0, W_img.shape[1]) 
 weights=W_img
-X_avg, labels_ms, bin_frames = pl.avg_consecutive_frames_with_ms_labels(X=weights, frame_ids=frame_ids, avg_n=3, dt_ms=10, zero_frame=27
+X_avg, labels_ms, bin_frames = pl.avg_consecutive_frames_with_ms_labels(X=weights, frame_ids=frame_ids, avg_n=3, dt_ms=10, zero_frame=RT_ZERO_FRAME
 )
 
 fig,axes_flat =pl.mimg(X_avg, xsize=100, ysize=100, low=-0.001, high=0.001, colormap=ourCmap, frames=labels_ms+10)
@@ -66,7 +79,7 @@ pl.mimg(neg_masks, xsize=100, ysize=100, low=0, high=1, frames=results_sliding_w
 
 sw.plot_sliding_window_accuracy_with_std(
     results_sliding_window,
-    zero_frame=27,          # frame 27 = 0 ms
+    zero_frame=RT_ZERO_FRAME,          # RT event frame, NOT stimulus-onset frame 27
     frame_duration_ms=10,   # 10 ms per frame
 )
 
@@ -126,11 +139,12 @@ export = {
     "n_folds":            np.float64(cfg["n_splits"]),
     "n_trials_per_class": np.float64(cfg["n_trials_per_class"]),
     "config_json":        json.dumps(cfg, default=str),     # full config (face_file, data_dir, frames, ...) as backstop
+    "is_rt_aligned":       True,                             # flag so MATLAB side can tell this apart from stim-aligned models
 
     # ---- arrays + scalars for plotting ----
     "Weights_acrossT":    np.asarray(W_img, dtype=np.float64),
     "centers":            np.asarray(R["centers"], dtype=np.float64).ravel(),
-    "zero_frame":         np.float64(27),
+    "zero_frame":         np.float64(RT_ZERO_FRAME),        # RT event frame (30), NOT stimulus-onset frame (27)
     "frame_duration_ms":  np.float64(10),
     "frame_acc_mean":     np.asarray(R["frame_acc_mean"], dtype=np.float64).ravel(),
     "trial_acc_mean":     np.asarray(R["trial_acc_mean"], dtype=np.float64).ravel(),

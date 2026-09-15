@@ -32,3 +32,15 @@ venv/
 # =====================
 *.log
 .DS_Store
+
+
+# Ignore model run outputs and caches
+results/
+*.pkl
+*.npy
+*.mat
+*.h5
+
+# Python caches
+__pycache__/
+*.py[cod]
