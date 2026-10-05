@@ -324,6 +324,35 @@ def _load_checkpoint(path, signature):
         return None
 
 
+def _check_only_groups(groups, only_groups):
+    if only_groups is None:
+        return None
+    names = [g['name'] for g in groups]
+    bad = [n for n in only_groups if n not in names]
+    if bad:
+        raise ValueError(f"only_groups {bad} not found; available groups: {names}")
+    return set(only_groups)
+
+
+def _groups_todo(datasets, groups, params, make_estimator, checkpoint_dir, only_groups):
+    """Indices of the groups that still have to be COMPUTED: in only_groups (if given) and no valid checkpoint."""
+    only = _check_only_groups(groups, only_groups)
+    n_datasets = len(datasets)
+    todo = []
+    for g, group in enumerate(groups):
+        if only is not None and group['name'] not in only:
+            continue
+        test_idx = list(group['dataset_idx'])
+        pool_idx = [i for i in range(n_datasets) if i not in test_idx]
+        if checkpoint_dir is not None:
+            path = Path(checkpoint_dir) / f"group_{g:02d}.npz"
+            sig = _group_signature(params, group, datasets, test_idx, pool_idx, make_estimator)
+            if path.exists() and _load_checkpoint(path, sig) is not None:
+                continue
+        todo.append(g)
+    return todo
+
+
 def _make_params(window_size, start_frame, stop_frame, step, n_folds, seed, make_estimator, extra_params=None):
     params = {'window_size': int(window_size), 'start_frame': int(start_frame), 'stop_frame': int(stop_frame),
               'step': int(step), 'n_folds': int(n_folds), 'seed': int(seed),
@@ -357,7 +386,7 @@ def _process_window(datasets, pool_idx, test_idx, start, window_size, folds, y_p
 
 def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame=1, stop_frame=100,
                     step=1, n_folds=10, seed=0, n_jobs=1, checkpoint_dir=None,
-                    extra_params=None, verbose=True):
+                    extra_params=None, only_groups=None, verbose=True):
     """
     Nested leave-one-face-out grand model (see the module docstring).
 
@@ -365,8 +394,12 @@ def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame
     groups : output of build_leave_out_groups
     make_estimator : callable -> fresh estimator, e.g. lambda: LinearSVC(C=0.0001, max_iter=10000)
     n_jobs : threads used to fit the n_folds models of a window in parallel
-    checkpoint_dir : if given, every finished group is saved there and skipped on a re-run
-        (only if the parameters, datasets and estimator are identical)
+    checkpoint_dir : if given, every finished group (= one left-out face, all its windows) is saved there as
+        group_XX.npz and skipped on a re-run (only if the parameters, datasets and estimator are identical)
+    only_groups : None = compute all groups; or a list of group names, e.g. ['face 2'], to compute only those
+        (pilot run). Groups with a valid checkpoint are always loaded; the others stay NaN and
+        results['groups_done'] says which groups are filled. A pilot group computed with the real settings
+        is saved as a normal checkpoint, so the full run reuses it.
 
     Returns results dict (arrays):
         'dataset_ids', 'dataset_face_ids', 'dataset_scramble', 'n_trials', 'group_of_dataset' (n_datasets)
@@ -378,6 +411,7 @@ def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame
                                            of the n_folds weight vectors of a group
         'w_fold_corr'                      (n_groups, n_windows) - mean pairwise Pearson r between the
                                            n_folds weight maps of a group
+        'groups_done'                      (n_groups,) bool - computed or loaded from a checkpoint
         'params'                           dict
     """
     n_datasets = len(datasets)
@@ -409,9 +443,13 @@ def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame
     inner_trial = np.full((n_groups, n_folds, n_windows), np.nan)
     ho_frame = np.full((n_datasets, n_folds, n_windows), np.nan)
     ho_trial = np.full((n_datasets, n_folds, n_windows), np.nan)
-    w_mean = np.zeros((n_groups, n_windows, n_pixels), dtype=np.float32)
-    w_std = np.zeros((n_groups, n_windows, n_pixels), dtype=np.float32)
+    w_mean = np.full((n_groups, n_windows, n_pixels), np.nan, dtype=np.float32)
+    w_std = np.full((n_groups, n_windows, n_pixels), np.nan, dtype=np.float32)
     w_fold_corr = np.full((n_groups, n_windows), np.nan)
+    groups_done = np.zeros(n_groups, dtype=bool)
+
+    only = _check_only_groups(groups, only_groups)
+    todo = _groups_todo(datasets, groups, params, make_estimator, checkpoint_dir, only_groups)
 
     t_run = time.time()
     n_computed = 0
@@ -431,9 +469,15 @@ def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame
                 w_mean[g] = ck['w_mean']
                 w_std[g] = ck['w_std']
                 w_fold_corr[g] = ck['w_fold_corr']
+                groups_done[g] = True
                 if verbose:
                     print(f"[group {g + 1}/{n_groups}] {group['name']}: loaded from checkpoint")
                 continue
+
+        if only is not None and group['name'] not in only:
+            if verbose:
+                print(f"[group {g + 1}/{n_groups}] {group['name']}: skipped (not in only_groups)")
+            continue
 
         t_group = time.time()
         pool_y = np.concatenate([datasets[i]['y'] for i in pool_idx])
@@ -474,10 +518,11 @@ def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame
                              ho_frame=ho_frame[test_idx], ho_trial=ho_trial[test_idx],
                              w_mean=w_mean[g], w_std=w_std[g], w_fold_corr=w_fold_corr[g])
 
+        groups_done[g] = True
         n_computed += 1
         if verbose:
             elapsed = time.time() - t_run
-            remaining = (n_groups - g - 1) * elapsed / n_computed
+            remaining = (len(todo) - n_computed) * elapsed / n_computed
             ho_peak = float(np.nanmean(ho_trial[test_idx]))
             print(f"    group done in {time.time() - t_group:.0f} s | mean left-out trial acc over all windows "
                   f"{ho_peak:.3f} | elapsed {elapsed / 60:.1f} min, ~{remaining / 60:.1f} min left")
@@ -499,6 +544,7 @@ def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame
         'w_mean_windows': w_mean,
         'w_std_windows': w_std,
         'w_fold_corr': w_fold_corr,
+        'groups_done': groups_done,
         'params': params,
     }
     return results
@@ -515,7 +561,7 @@ def _fmt_duration(sec):
 
 def estimate_runtime(datasets, groups, make_estimator, window_size=5, start_frame=1, stop_frame=100, step=1,
                      n_folds=10, seed=0, n_jobs=1, checkpoint_dir=None, extra_params=None,
-                     n_bench_windows=2, verbose=True):
+                     only_groups=None, n_bench_windows=2, verbose=True):
     """
     Small run-time calculator. Times a few REAL windows (all n_folds models, the same code path and the same
     n_jobs as the real run) on the largest pool and extrapolates to every window of every group that still has
@@ -531,23 +577,14 @@ def estimate_runtime(datasets, groups, make_estimator, window_size=5, start_fram
     n_windows = len(starts)
     params = _make_params(window_size, start_frame, stop_frame, step, n_folds, seed, make_estimator, extra_params)
 
-    todo = []
-    for g, group in enumerate(groups):
-        test_idx = list(group['dataset_idx'])
-        pool_idx = [i for i in range(n_datasets) if i not in test_idx]
-        if checkpoint_dir is not None:
-            path = Path(checkpoint_dir) / f"group_{g:02d}.npz"
-            sig = _group_signature(params, group, datasets, test_idx, pool_idx, make_estimator)
-            if path.exists() and _load_checkpoint(path, sig) is not None:
-                continue
-        todo.append(g)
+    todo = _groups_todo(datasets, groups, params, make_estimator, checkpoint_dir, only_groups)
 
     n_fits = len(todo) * n_folds * n_windows
     result = {'sec_per_window': 0.0, 'n_windows': n_windows, 'n_groups_todo': len(todo),
               'n_fits': n_fits, 'total_sec': 0.0}
     print("=== Run-time estimate ===")
     if not todo:
-        print(f"all {len(groups)} groups already have a valid checkpoint - nothing left to compute")
+        print("nothing left to compute (every requested group already has a valid checkpoint)")
         return result
 
     g_b = min(todo, key=lambda g: len(groups[g]['dataset_idx']))        # largest pool = fewest left-out datasets
@@ -577,7 +614,8 @@ def estimate_runtime(datasets, groups, make_estimator, window_size=5, start_fram
           f"{len(pool_y)} trials), {n_folds} fold models each, n_jobs={n_jobs}: "
           + ", ".join(f"{t:.1f} s" for t in times))
     print(f"per window (all {n_folds} fold models): {sec_per_window:.1f} s")
-    print(f"still to run: {len(todo)} of {len(groups)} groups x {n_windows} windows = "
+    print(f"still to run: {len(todo)} of {len(groups)} groups"
+          f"{'' if only_groups is None else ' (only_groups: ' + ', '.join(only_groups) + ')'} x {n_windows} windows = "
           f"{len(todo) * n_windows:,} windows = {n_fits:,} fits")
     print(f"estimated total: {_fmt_duration(total_sec)} ({total_sec / 3600:.1f} h), "
           f"finishing around {finish.strftime('%a %H:%M')}")
@@ -613,6 +651,8 @@ def load_results(path):
         results['params'] = json.loads(str(d['params_json']))
     for key in ('dataset_ids', 'dataset_scramble', 'group_names'):
         results[key] = [str(x) for x in results[key]]
+    if 'groups_done' not in results:                      # files saved before the pilot option existed
+        results['groups_done'] = np.ones(len(results['group_names']), dtype=bool)
     return results
 
 
@@ -909,6 +949,170 @@ def plot_fold_spread(results, metric='trial_acc'):
 
 
 # ===========================================================================
+# 6b. Single left-out group check (use on a pilot run of one face, or on any computed group)
+# ===========================================================================
+def _group_index(results, group_name):
+    names = list(results['group_names'])
+    if group_name not in names:
+        raise ValueError(f"unknown group {group_name!r}; available: {names}")
+    g = names.index(group_name)
+    if not bool(np.asarray(results['groups_done'])[g]):
+        raise ValueError(f"group {group_name!r} was not computed in this results file")
+    return g
+
+
+def print_group_check(results, group_name, chance=0.5):
+    """Numbers to look at for one left-out group: pre-stimulus sanity check, peak window, fold stability."""
+    g = _group_index(results, group_name)
+    time_ms = results['time_ms']
+    ds_idx = np.where(np.asarray(results['group_of_dataset']) == g)[0]
+    n_trials = int(np.asarray(results['n_trials'])[ds_idx].sum())
+    ho_t = group_accuracy(results, 'trial_acc', 'heldout')[g]                  # (n_folds, n_windows)
+    ho_f = group_accuracy(results, 'frame_acc', 'heldout')[g]
+    in_t = results['inner_trial_acc'][g]
+    pre = time_ms < 0
+    peak = find_peak_window(ho_t.mean(axis=0), time_ms)
+    band = 1.96 * np.sqrt(chance * (1 - chance) / n_trials)
+
+    print(f"=== single-group check: left out {group_name} "
+          f"({', '.join(results['dataset_ids'][i] for i in ds_idx)}), {n_trials} trials, "
+          f"{ho_t.shape[0]} fold models, {ho_t.shape[1]} windows ===")
+    print(f"pre-stimulus left-out trial acc (should be ~{chance}): {float(ho_t[:, pre].mean()):.3f} "
+          f"(95% band for one model on {n_trials} trials: {chance - band:.2f} to {chance + band:.2f})")
+    print(f"peak (post-stimulus) at {float(time_ms[peak]):.0f} ms:")
+    print(f"   left-out trial acc  {float(ho_t[:, peak].mean()):.3f} +/- {float(ho_t[:, peak].std(ddof=1)):.3f} SD over the fold models")
+    print(f"   left-out frame acc  {float(ho_f[:, peak].mean()):.3f} +/- {float(ho_f[:, peak].std(ddof=1)):.3f}")
+    print(f"   within-pool trial acc (own held-out 10%)  {float(in_t[:, peak].mean()):.3f}")
+    print(f"   mean weight-map correlation between the fold models  {float(results['w_fold_corr'][g, peak]):.3f}")
+    n_above = int((ho_t.mean(axis=0)[~pre] > chance + band).sum())
+    print(f"post-stimulus windows above the chance band: {n_above} / {int((~pre).sum())}")
+    if len(ds_idx) > 1:
+        for d in ds_idx:
+            acc_d = results['ho_trial_acc'][d].mean(axis=0)
+            print(f"   {results['dataset_ids'][d]} ({results['dataset_scramble'][d]}): "
+                  f"{float(acc_d[peak]):.3f} at the peak window")
+
+
+def plot_group_check_accuracy(results, group_name, chance=0.5):
+    """
+    Accuracy picture of ONE left-out group: every fold model (thin lines) and their mean on the left-out
+    face, against the within-pool accuracy; frame- vs trial-level; spread over the fold models; and the
+    correlation between the weight maps of the fold models.
+    """
+    g = _group_index(results, group_name)
+    time_ms = results['time_ms']
+    ds_idx = np.where(np.asarray(results['group_of_dataset']) == g)[0]
+    n_trials = int(np.asarray(results['n_trials'])[ds_idx].sum())
+    ho_t = group_accuracy(results, 'trial_acc', 'heldout')[g]
+    ho_f = group_accuracy(results, 'frame_acc', 'heldout')[g]
+    in_t = results['inner_trial_acc'][g]
+    band = 1.96 * np.sqrt(chance * (1 - chance) / n_trials)
+    n_folds = ho_t.shape[0]
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8.5))
+    ax = axes[0, 0]
+    ax.axhspan(chance - band, chance + band, color='gray', alpha=0.15,
+               label=f'chance, 95% band for one model ({n_trials} trials)')
+    for k in range(n_folds):
+        ax.plot(time_ms, ho_t[k], color='tab:orange', lw=0.6, alpha=0.5)
+    ax.plot(time_ms, ho_t.mean(axis=0), color='tab:orange', lw=2.4, label=f'left-out {group_name}: mean of the {n_folds} fold models')
+    if len(ds_idx) > 1:
+        for d, color in zip(ds_idx, ['tab:green', 'tab:red', 'tab:brown']):
+            ax.plot(time_ms, results['ho_trial_acc'][d].mean(axis=0), ls='--', lw=1.2, color=color,
+                    label=f"   {results['dataset_ids'][d]} ({results['dataset_scramble'][d]})")
+    ax.plot(time_ms, in_t.mean(axis=0), color='tab:blue', lw=2, label='within-pool (own held-out 10%)')
+    ax.axhline(chance, color='gray', ls='--', lw=1)
+    ax.axvline(0, color='red', ls='--', lw=1)
+    ax.set_ylim(min(0.4, float(np.nanmin(ho_t)) - 0.02), 1.03)
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('Trial-level accuracy')
+    ax.set_title('Trial-level accuracy')
+    ax.legend(fontsize=7, loc='lower right')
+
+    ax = axes[0, 1]
+    for arr, color, label in [(ho_t, 'tab:orange', 'trial-level (majority vote)'), (ho_f, 'tab:purple', 'frame-level')]:
+        m, sd = arr.mean(axis=0), arr.std(axis=0, ddof=1)
+        ax.plot(time_ms, m, color=color, lw=2, label=label)
+        ax.fill_between(time_ms, m - sd, m + sd, color=color, alpha=0.2)
+    ax.axhline(chance, color='gray', ls='--', lw=1)
+    ax.axvline(0, color='red', ls='--', lw=1)
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('Accuracy (mean +/- SD over fold models)')
+    ax.set_title('Frame-level vs trial-level on the left-out face')
+    ax.legend(fontsize=8, loc='lower right')
+
+    ax = axes[1, 0]
+    ax.plot(time_ms, ho_t.std(axis=0, ddof=1), color='tab:orange', lw=2, label='trial-level')
+    ax.plot(time_ms, ho_f.std(axis=0, ddof=1), color='tab:purple', lw=2, label='frame-level')
+    ax.axvline(0, color='red', ls='--', lw=1)
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('SD over the fold models')
+    ax.set_title('How much the accuracy depends on which ~90% of the pooled trials trained the model')
+    ax.title.set_fontsize(9)
+    ax.legend(fontsize=8)
+
+    ax = axes[1, 1]
+    ax.plot(time_ms, results['w_fold_corr'][g], color='tab:blue', lw=2)
+    ax.axvline(0, color='red', ls='--', lw=1)
+    ax.set_ylim(min(0.0, float(np.nanmin(results['w_fold_corr'][g])) - 0.05), 1.0)
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('mean Pearson r')
+    ax.set_title('Weight-map correlation between the fold models', fontsize=9)
+
+    ids = ', '.join(results['dataset_ids'][i] for i in ds_idx)
+    fig.suptitle(f"Single-group check - left out {group_name} ({ids})", fontsize=13)
+    fig.tight_layout()
+    return fig
+
+
+def plot_group_check_weights(results, group_name, times_ms=(-100, 50, 100, 200, 300), include_peak=True,
+                             clip_percentile=99, cmap='RdBu_r'):
+    """
+    Top row: mean weight map of the group's fold models at chosen times (+ the peak-accuracy window).
+    Bottom row: SD of each weight over the fold models (how much the map changes with the training subset).
+    """
+    g = _group_index(results, group_name)
+    time_ms = results['time_ms']
+    ho_t = group_accuracy(results, 'trial_acc', 'heldout')[g]
+
+    idxs, labels = [], []
+    for t in times_ms:
+        i = int(np.argmin(np.abs(time_ms - t)))
+        if i not in idxs:
+            idxs.append(i)
+            labels.append(f"{float(time_ms[i]):.0f} ms")
+    if include_peak:
+        p = find_peak_window(ho_t.mean(axis=0), time_ms)
+        if p in idxs:
+            labels[idxs.index(p)] += " (peak acc.)"
+        else:
+            idxs.append(p)
+            labels.append(f"{float(time_ms[p]):.0f} ms (peak acc.)")
+    order = np.argsort(idxs)
+    idxs, labels = [idxs[k] for k in order], [labels[k] for k in order]
+
+    mean_maps = [_pix_to_img(results['w_mean_windows'][g, i]) for i in idxs]
+    sd_maps = [_pix_to_img(results['w_std_windows'][g, i]) for i in idxs]
+    vmax = float(np.percentile(np.abs(np.stack(mean_maps)), clip_percentile))
+    smax = float(np.percentile(np.stack(sd_maps), clip_percentile))
+
+    ncols = len(idxs)
+    fig, axes = plt.subplots(2, ncols, figsize=(2.9 * ncols + 1.2, 6.4), squeeze=False)
+    im1 = im2 = None
+    for k in range(ncols):
+        im1 = axes[0, k].imshow(mean_maps[k], cmap=cmap, vmin=-vmax, vmax=vmax)
+        axes[0, k].set_title(labels[k], fontsize=9)
+        im2 = axes[1, k].imshow(sd_maps[k], cmap='magma', vmin=0, vmax=smax)
+        axes[0, k].axis('off')
+        axes[1, k].axis('off')
+    fig.colorbar(im1, ax=axes[0].tolist(), shrink=0.85, label='mean weight')
+    fig.colorbar(im2, ax=axes[1].tolist(), shrink=0.85, label='SD over fold models')
+    fig.suptitle(f"Weight maps of the models trained with {group_name} left out "
+                 f"(top: mean over the fold models, bottom: SD over the fold models)", fontsize=12)
+    return fig
+
+
+# ===========================================================================
 # 7. Weight figures
 # ===========================================================================
 def _grand_mean_weights(results):
@@ -943,6 +1147,8 @@ def plot_weight_maps(results, times_ms=(-100, 0, 50, 100, 150, 200, 300, 400), i
         else:
             idxs.append(p)
             labels.append(f"{float(time_ms[p]):.0f} ms (peak acc.)")
+    order = np.argsort(idxs)
+    idxs, labels = [idxs[k] for k in order], [labels[k] for k in order]
 
     maps = [_pix_to_img(M[i]) for i in idxs]
     vmax = float(np.percentile(np.abs(np.stack(maps)), clip_percentile))

@@ -35,6 +35,7 @@ from loso_grand_model_functions import (
 DATA_DIR = r"C:\project\vsdi-face-decoding\data\processed\condsXn"
 RESULTS_DIR = Path(r"C:\project\vsdi-face-decoding\results")
 OUT_NAME = "loso_nested_grand_model_results.npz"
+PILOT_OUT_NAME = "loso_nested_grand_model_pilot.npz"      # used instead of OUT_NAME when ONLY_GROUPS is set
 
 SESSIONS = [
     # 11/2/2009
@@ -76,7 +77,13 @@ EXTRA_PARAMS = {'baseline_frames': list(BASELINE_FRAMES),
                 'z_score': 'baseline-centered per trial; std pooled over all trials of all datasets'}
 
 ESTIMATE_RUNTIME = True       # time 2 real windows and print the expected total run time before the long run
-ESTIMATE_ONLY = True         # True = stop right after the estimate (nothing is trained or saved)
+ESTIMATE_ONLY = False         # True = stop right after the estimate (nothing is trained or saved)
+
+# PILOT: compute only some left-out faces first, e.g. ONLY_GROUPS = ['face 2'], and look at them with
+# loso_grand_model_figures_main.py before running everything. None = all 12 groups.
+# A pilot group run with the SAME parameters as the full run is saved as a normal checkpoint, so the full run
+# reuses it (change e.g. STEP and it is recomputed).
+ONLY_GROUPS = ['face 2']
 
 
 def make_estimator():
@@ -100,6 +107,7 @@ if __name__ == "__main__":
             window_size=WINDOW_SIZE, start_frame=START_FRAME, stop_frame=STOP_FRAME, step=STEP,
             n_folds=N_FOLDS, seed=SEED, n_jobs=N_JOBS,
             checkpoint_dir=CHECKPOINT_DIR if RESUME else None, extra_params=EXTRA_PARAMS,
+            only_groups=ONLY_GROUPS,
         )
         if ESTIMATE_ONLY:
             sys.exit(0)
@@ -110,8 +118,14 @@ if __name__ == "__main__":
         window_size=WINDOW_SIZE, start_frame=START_FRAME, stop_frame=STOP_FRAME, step=STEP,
         n_folds=N_FOLDS, seed=SEED, n_jobs=N_JOBS,
         checkpoint_dir=CHECKPOINT_DIR if RESUME else None, extra_params=EXTRA_PARAMS,
+        only_groups=ONLY_GROUPS,
     )
 
-    out_path = save_results(results, RESULTS_DIR / OUT_NAME)
+    out_name = OUT_NAME if ONLY_GROUPS is None else PILOT_OUT_NAME
+    out_path = save_results(results, RESULTS_DIR / out_name)
     print(f"\nSaved results to {out_path}")
-    print("Open it with loso_grand_model_figures_main.py")
+    if ONLY_GROUPS is not None:
+        print(f"PILOT file ({', '.join(ONLY_GROUPS)} only). In loso_grand_model_figures_main.py set "
+              f"NPZ_NAME = \"{out_name}\" to look at it.")
+    else:
+        print("Open it with loso_grand_model_figures_main.py")
