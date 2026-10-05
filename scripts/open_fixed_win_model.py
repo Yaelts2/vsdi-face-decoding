@@ -5,6 +5,7 @@ from functions_scripts import preprocessing_functions as pre
 from functions_scripts import Weights_Evaluation as ev
 from functions_scripts import ml_plots as pl
 from functions_scripts import save_results as sr
+from functions_scripts import feature_extraction as fe
 
 ourCmap = pre.green_gray_magenta()
 
@@ -16,12 +17,13 @@ ourCmap = pre.green_gray_magenta()
 ## user must edit these parameters for each run!##
 ### which model to load and plot results from
 results_root = Path(r"C:\project\vsdi-face-decoding\results")
-model_root = results_root / "fixed_window__frame47-55__SVM_10fold__V2__2026-04-26_13-19-03" # <-- update this to your model folder you want to load and plot results from
+model_root = results_root / "fixed_window__frame32-40__SVM_10fold____2026-06-25_19-14-36" # <-- update this to your model folder you want to load and plot results from
 print("model_root:", model_root)
 
 
 ### Load the experiment results and config
 config_fixed_window, results_fixed_window, ROI_mask_path = sr.load_experiment(str(model_root))
+
 trials_per_cond = config_fixed_window.get("n_trials_per_class",28)
 print("Experiment config:", config_fixed_window)
 ### prepering data that was used for this experiment (e.g. for plotting weight maps, etc.)
@@ -38,9 +40,78 @@ window = config_fixed_window["window"]
 window = (int(window[0]), int(window[1]))
 X_win = X_ROI[:, window[0]:window[1], :]
 print("X_trials after windowing:", X_win.shape)
-
+y_true = np.asarray(results_fixed_window["oof_y_true"], dtype=int)
+scores = np.asarray(results_fixed_window["oof_scores"], dtype=float)
 a=11
+# --- rebuild trial IDs (groups); depends only on array shape ---
+_, y_frames_chk, groups = fe.frames_as_samples(X_win, y_trials,
+                                               trial_axis=-1, frame_axis=1, pixel_axis=0)
+assert np.array_equal(np.asarray(y_frames_chk, dtype=int), y_true), "sample order mismatch!"
 
+# --- one score per trial = mean over its frames ---
+trial_ids = np.unique(groups)
+trial_score = np.array([scores[groups == t].mean() for t in trial_ids], dtype=float)
+trial_label = np.array([y_true[groups == t][0] for t in trial_ids], dtype=int)
+
+print("trial accuracy (sign of mean score):", float(np.mean((trial_score > 0).astype(int) == trial_label)))
+print("trial accuracy (majority vote, saved):", float(results_fixed_window["outer_acc_trial_mean"]))
+
+
+# --- presentation strip plot ---
+face_col, nonface_col = "#C2185B", "#2E7D32"   # magenta / green, as in your weight maps
+correct = (trial_score > 0).astype(int) == trial_label
+n_correct, n_total = int(correct.sum()), int(correct.size)
+
+# print misclassified trials (for your notes)
+for i in np.where(~correct)[0]:
+    print(f"misclassified trial {int(trial_ids[i])}: label={int(trial_label[i])}, "
+          f"score={float(trial_score[i]):.4f}")
+
+lim = 1.15 * float(np.max(np.abs(trial_score)))
+rng = np.random.default_rng(0)
+
+fig, ax = plt.subplots(figsize=(8, 3.8))
+
+# shaded decision regions + boundary
+ax.axvspan(-lim, 0, color=nonface_col, alpha=0.08, zorder=0)
+ax.axvspan(0, lim, color=face_col, alpha=0.08, zorder=0)
+ax.axvline(0, color="0.3", linestyle="--", linewidth=1.5, zorder=1)
+ax.text(-lim * 0.97, 1.5, "decoded as non-face", color=nonface_col,
+        fontsize=12, fontweight="bold", va="center")
+ax.text(lim * 0.97, 1.5, "decoded as face", color=face_col,
+        fontsize=12, fontweight="bold", va="center", ha="right")
+
+# one dot per trial: filled = correct, hollow ring = misclassified
+for lab, col, row in [(1, face_col, 1), (0, nonface_col, 0)]:
+    m = trial_label == lab
+    s, ok = trial_score[m], correct[m]
+    y = row + rng.uniform(-0.14, 0.14, s.size)
+    ax.scatter(s[ok], y[ok], s=80, color=col, edgecolor="white", linewidth=0.8, zorder=3)
+    ax.scatter(s[~ok], y[~ok], s=95, facecolor="white", edgecolor=col, linewidth=2.2, zorder=4)
+
+ax.set_xlim(-lim, lim)
+ax.set_ylim(-0.5, 1.7)
+ax.set_yticks([0, 1])
+ax.set_yticklabels(["Non-face\ntrials", "Face\ntrials"], fontsize=14)
+ax.set_xlabel("SVM decision score (one dot = one trial)", fontsize=13)
+
+# title + held-out subtitle
+ax.set_title(f"{n_correct}/{n_total} trials decoded correctly", fontsize=16,
+             fontweight="bold", pad=28)
+ax.text(0.5, 1.04, "Held-out trials · 10-fold cross-validation (nested)",
+        transform=ax.transAxes, ha="center", fontsize=11, color="0.35")
+
+ax.tick_params(axis="x", labelsize=12)
+ax.tick_params(axis="y", length=0)
+for sp in ("top", "right", "left"):
+    ax.spines[sp].set_visible(False)
+
+plt.tight_layout()
+fig.savefig("fixed_window_trial_scores.png", dpi=300, bbox_inches="tight", transparent=True)
+plt.show()
+###############################
+
+'''
 # =========================
 # PLOTS 
 # =========================
@@ -116,3 +187,4 @@ print(positive_mask.sum(), negative_mask.sum())
 
 
 
+'''

@@ -50,13 +50,13 @@ print("Backend after all imports:", matplotlib.get_backend())
 # =====================================================================
 
 CACHE_PATH = Path(r"C:\project\vsdi-face-decoding\results\error_trials_cache_V1.pkl")
-USE_CACHE = True      # set False to force a full recompute of the per-session loop
+USE_CACHE = False      # set False to force a full recompute of the per-session loop
 
 # If True, correct trials are randomly subsampled ONCE per session (before any
 # window is computed) down to that session's error-trial count -- matches
 # Ayzenshtat et al. (2012)'s approach so both groups contribute equal noise.
 # Changing this REQUIRES USE_CACHE=False for one run (it changes what the loop computes).
-MATCH_CORRECT_TO_ERROR = False
+MATCH_CORRECT_TO_ERROR = True
 SUBSAMPLE_SEED = 42
 
 # =====================================================================

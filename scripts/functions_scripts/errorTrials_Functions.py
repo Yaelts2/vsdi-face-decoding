@@ -1379,7 +1379,7 @@ def add_significance_markers(ax, sig_results, comparisons=('correct_vs_error',),
 
 
 def test_window_average(correct_list, error_list, centers, window, null_value=None, label="metric",
-                         plot=True, session_names=None, area_label=None, ylabel="Value"):
+                         plot=True, plot_dist=True, session_names=None, area_label=None, ylabel="Value"):
     """
     Collapse each session's curve to ONE mean value within `window`, then run a
     single paired Wilcoxon test. If plot=True (default), also builds the
@@ -1419,8 +1419,83 @@ def test_window_average(correct_list, error_list, centers, window, null_value=No
             result, session_names=session_names, area_label=area_label, ylabel=ylabel)
         result["fig"] = fig
         result["ax"] = (ax_left, ax_right)
-
+    if plot_dist:
+        fig_d, axes_d = plot_window_distributions(
+            result, null_value=null_value, session_names=session_names,
+            area_label=area_label, ylabel=ylabel)
+        result["fig_dist"] = fig_d
+        result["ax_dist"] = axes_d
     return result
+
+def plot_window_distributions(result, null_value=None, session_names=None, area_label=None,
+                              ylabel="Value", n_bins=10, seed=0):
+    """
+    Distribution across sessions of the window-averaged metric, separately for
+    correct and error trials.
+      Left:  overlaid histograms (shared bins) + group means + null line
+      Right: violin + box + individual session points
+    """
+    correct = np.asarray(result["correct_win_mean"], dtype=float)
+    error = np.asarray(result["error_win_mean"], dtype=float)
+    w0, w1 = result["window"]
+    n = len(correct)
+    c_col, e_col = "tab:blue", "tab:red"
+
+    fig, (ax_h, ax_v) = plt.subplots(1, 2, figsize=(12, 5))
+
+    # ---------- left: histograms with shared bins ----------
+    all_vals = np.concatenate([correct, error])
+    lo, hi = float(all_vals.min()), float(all_vals.max())
+    pad = 0.05 * (hi - lo) if hi > lo else 0.01
+    bins = np.linspace(lo - pad, hi + pad, n_bins + 1)
+
+    ax_h.hist(correct, bins=bins, alpha=0.5, color=c_col, edgecolor="k", label=f"Correct (n={n})")
+    ax_h.hist(error, bins=bins, alpha=0.5, color=e_col, edgecolor="k", label=f"Error (n={n})")
+    ax_h.axvline(float(correct.mean()), color=c_col, ls="--", lw=2,
+                 label=f"Correct mean = {float(correct.mean()):.3f}")
+    ax_h.axvline(float(error.mean()), color=e_col, ls="--", lw=2,
+                 label=f"Error mean = {float(error.mean()):.3f}")
+    if null_value is not None:
+        ax_h.axvline(null_value, color="gray", ls=":", lw=2, label=f"Null = {null_value}")
+    ax_h.set_xlabel(f"{ylabel} (mean over frames {w0}-{w1})")
+    ax_h.set_ylabel("Number of sessions")
+    ax_h.set_title("Distribution across sessions")
+    ax_h.legend(fontsize=8)
+
+    # ---------- right: violin + box + points ----------
+    positions = [1, 2]
+    vp = ax_v.violinplot([correct, error], positions=positions, showextrema=False, widths=0.7)
+    for body, col in zip(vp["bodies"], [c_col, e_col]):
+        body.set_facecolor(col)
+        body.set_alpha(0.3)
+        body.set_edgecolor("k")
+
+    ax_v.boxplot([correct, error], positions=positions, widths=0.15, showfliers=False,
+                 medianprops=dict(color="k", lw=2))
+
+    rng = np.random.default_rng(seed)
+    for pos, vals, col in zip(positions, [correct, error], [c_col, e_col]):
+        jitter = rng.uniform(-0.08, 0.08, size=len(vals))
+        ax_v.scatter(pos + jitter, vals, color=col, edgecolor="k", s=40, zorder=3)
+
+    if null_value is not None:
+        ax_v.axhline(null_value, color="gray", ls=":", lw=2)
+    ax_v.set_xticks(positions)
+    ax_v.set_xticklabels(["Correct", "Error"])
+    ax_v.set_ylabel(f"{ylabel} (window mean)")
+
+    p_txt = f"paired Wilcoxon p = {float(result['p_value']):.4f}"
+    if "correct_vs_null_p" in result:
+        p_txt += (f"\nCorrect vs null p = {float(result['correct_vs_null_p']):.4f} | "
+                  f"Error vs null p = {float(result['error_vs_null_p']):.4f}")
+    ax_v.set_title(p_txt, fontsize=9)
+
+    title = f"Window-averaged {ylabel.lower()}, frames {w0}-{w1}, {n} sessions"
+    if area_label:
+        title = f"{area_label}: " + title
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig, (ax_h, ax_v)
 
 
 def test_window_average_permutation(correct_list, error_list, centers, window,
@@ -1563,47 +1638,49 @@ def plot_window_average_comparison(window_result, session_names=None, area_label
     return fig, (ax_left, ax_right)
 
 
-def sliding_window_effect_size(correct_list, error_list, centers, window_width=16, method="paired"):
+def sliding_window_effect_size(correct_list, error_list, centers, window_width=5, sd_type="total"):
     """
-    Sliding-window Cohen's d -- MAGNITUDE ONLY, no significance test. Slides a
-    window_width-frame window across the whole time course; at each position,
-    collapses each session to its window mean and computes an effect size.
-
-    method='paired' (default): d = mean(diff) / std(diff) -- divides by
-        session-to-session spread of the differences.
-    method='pooled': d = (mean(correct)-mean(error)) / std(correct and error
-        pooled) -- the "classic" unpaired Cohen's d.
+    Sliding-window effect size.
+    For each window position:
+      1. average each session over the window frames -> one value per session
+      2. mean of correct sessions, mean of error sessions
+      3. SD:
+           sd_type='total'  -> SD of all correct + error values together (concatenated)
+           sd_type='within' -> sqrt((var_correct + var_error) / 2)  (standard Cohen's d)
+      4. d = (mean_c - mean_e) / SD
+    Use an ODD window_width so the window is centered on the frame.
     """
-    if method not in ("paired", "pooled"):
-        raise ValueError("method must be 'paired' or 'pooled'")
+    if sd_type not in ("total", "within"):
+        raise ValueError("sd_type must be 'total' or 'within'")
 
-    correct_arr = np.vstack(correct_list)
+    correct_arr = np.vstack(correct_list)   # shape: (n_sessions, n_frames)
     error_arr = np.vstack(error_list)
-    n_windows_total = correct_arr.shape[1]
+    centers = np.asarray(centers)
     half = window_width // 2
+    n_frames = correct_arr.shape[1]
 
-    valid_positions = np.arange(half, n_windows_total - half)
-    window_centers = centers[valid_positions]
-    n_positions = len(valid_positions)
+    window_centers, d_values = [], []
+    for pos in range(half, n_frames - half):
+        frames = slice(pos - half, pos + half + 1)
 
-    d_values = np.full(n_positions, np.nan)
+        correct_win = correct_arr[:, frames].mean(axis=1)   # one value per session
+        error_win = error_arr[:, frames].mean(axis=1)
 
-    for k, pos in enumerate(valid_positions):
-        lo, hi = pos - half, pos - half + window_width
-        correct_win = correct_arr[:, lo:hi].mean(axis=1)
-        error_win = error_arr[:, lo:hi].mean(axis=1)
+        mean_c = correct_win.mean()
+        mean_e = error_win.mean()
 
-        if method == "paired":
-            diff = correct_win - error_win
-            sd = diff.std(ddof=1)
-            d_values[k] = diff.mean() / sd if sd > 0 else np.nan
+        if sd_type == "total":
+            sd = np.concatenate([correct_win, error_win]).std(ddof=1)
         else:
-            pooled = np.concatenate([correct_win, error_win])
-            sd = pooled.std(ddof=1)
-            d_values[k] = (correct_win.mean() - error_win.mean()) / sd if sd > 0 else np.nan
+            sd = np.sqrt((correct_win.var(ddof=1) + error_win.var(ddof=1)) / 2)
 
-    return {"window_centers": window_centers, "window_width": window_width,
-            "method": method, "d_values": d_values}
+        d = (mean_c - mean_e) / sd if sd > 0 else np.nan
+
+        window_centers.append(float(centers[pos]))
+        d_values.append(float(d))
+
+    return {"window_centers": np.array(window_centers), "window_width": window_width,
+            "method": f"pooled ({sd_type} SD)", "d_values": np.array(d_values)}
 
 
 def plot_sliding_window_effect_size(sliding_d_results, area_label=None, title=None,
@@ -1712,3 +1789,130 @@ def cluster_permutation_test(correct_list, error_list, centers, n_permutations=2
 
     return {"clusters": results, "null_max_mass": max_null_mass, "t_obs": t_obs,
             "centers": centers, "t_thresh": t_thresh}
+    
+    
+    
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+
+
+def _find_runs(mask):
+    """Contiguous True runs in a 1-D boolean array -> list of (start, end) inclusive."""
+    m = np.concatenate(([0], np.asarray(mask, dtype=int), [0]))
+    d = np.diff(m)
+    return list(zip(np.where(d == 1)[0], np.where(d == -1)[0] - 1))
+
+
+def plot_correct_vs_error_thesis(correct_list, error_list, centers, sig_results,
+                                 zero_frame=28, frame_ms=10,
+                                 chance=0.5, ylabel="Decoding accuracy", ylim=(0.4, 1.0),
+                                 xlim_ms=(-100, 280), show_sessions=False,
+                                 comparisons=("correct_vs_error", "correct_vs_chance", "error_vs_chance"),
+                                 c_correct="#CC79A7", c_error="#8C8C8C", c_compare="#0072B2",
+                                 figsize_cm=(17, 11), font="Arial", font_size=11):
+    """Thesis-ready grand average of correct vs. error trials.
+
+    correct_list, error_list : lists of 1-D arrays (one per session, one value per window)
+    centers                  : window centers in frames (same convention as the MATLAB plots)
+    sig_results              : output of etf.run_group_significance_tests (uses ['sig_mask'])
+    zero_frame, frame_ms     : time (ms) = (centers - zero_frame) * frame_ms
+    ylim                     : (lo, hi) or None for automatic limits (within xlim_ms)
+    xlim_ms                  : plotted time range (ms); None = full range
+    """
+    C = np.vstack([np.asarray(a, dtype=float).ravel() for a in correct_list])   # sessions x windows
+    E = np.vstack([np.asarray(a, dtype=float).ravel() for a in error_list])
+    t = (np.asarray(centers, dtype=float).ravel() - zero_frame) * frame_ms
+    dt = np.median(np.diff(t))
+    n_sess = C.shape[0]
+
+    def mean_sem(M):
+        n = np.sum(~np.isnan(M), axis=0)
+        return np.nanmean(M, axis=0), np.nanstd(M, axis=0, ddof=1) / np.sqrt(n)
+
+    mC, sC = mean_sem(C)
+    mE, sE = mean_sem(E)
+
+    row_style = {
+        "correct_vs_error":  ("Correct vs. error",  c_compare),
+        "correct_vs_chance": ("Correct vs. chance", c_correct),
+        "error_vs_chance":   ("Error vs. chance",   c_error),
+    }
+    comparisons = [c for c in comparisons if c in sig_results]
+
+    if xlim_ms is None:
+        xlim_ms = (t[0], t[-1])
+
+    rc = {"font.family": font, "font.size": font_size,
+          "axes.linewidth": 0.75, "xtick.major.width": 0.75, "ytick.major.width": 0.75,
+          "xtick.direction": "out", "ytick.direction": "out"}
+
+    with plt.rc_context(rc):
+        cm = 1 / 2.54
+        fig = plt.figure(figsize=(figsize_cm[0] * cm, figsize_cm[1] * cm))
+        n_rows = len(comparisons)
+        gs = GridSpec(2, 1, height_ratios=[0.09 * n_rows + 0.02, 1], hspace=0.04,
+                      left=0.20, right=0.87, bottom=0.14, top=0.97, figure=fig)
+        ax_s = fig.add_subplot(gs[0])
+        ax = fig.add_subplot(gs[1], sharex=ax_s)
+
+        # ---- main axes ----
+        ax.axhline(chance, color="0.5", lw=0.75, ls=":", zorder=1)
+        ax.axvline(0, color="0.5", lw=0.75, zorder=1)
+
+        if show_sessions:
+            for row in C:
+                ax.plot(t, row, color=c_correct, lw=0.5, alpha=0.15, zorder=2)
+            for row in E:
+                ax.plot(t, row, color=c_error, lw=0.5, alpha=0.15, zorder=2)
+
+        for m, s, c in ((mC, sC, c_correct), (mE, sE, c_error)):
+            ax.fill_between(t, m - s, m + s, color=c, alpha=0.22, lw=0, zorder=3)
+            ax.plot(t, m, color=c, lw=1.8, zorder=4)
+
+        if ylim is None:
+            w = (t >= xlim_ms[0]) & (t <= xlim_ms[1])          # only the plotted window
+            lo = np.nanmin(np.r_[(mC - sC)[w], (mE - sE)[w], chance])
+            hi = np.nanmax(np.r_[(mC + sC)[w], (mE + sE)[w], chance])
+            pad = 0.08 * (hi - lo)
+            ylim = (lo - pad, hi + pad)
+        ax.set_xlim(xlim_ms)
+        ax.set_ylim(ylim)
+
+        # direct labels at the right edge, nudged apart if they collide
+        yr = ylim[1] - ylim[0]
+        yC_end = np.interp(xlim_ms[1], t, mC)
+        yE_end = np.interp(xlim_ms[1], t, mE)
+        ends = sorted([(yC_end, "Correct", c_correct), (yE_end, "Error", c_error)],
+                      key=lambda z: z[0])
+        if ends[1][0] - ends[0][0] < 0.06 * yr:
+            mid = (ends[0][0] + ends[1][0]) / 2
+            ends = [(mid - 0.03 * yr,) + ends[0][1:], (mid + 0.03 * yr,) + ends[1][1:]]
+        for y_end, lab, c in ends:
+            ax.text(xlim_ms[1] + 0.012 * (xlim_ms[1] - xlim_ms[0]), y_end, lab, color=c,
+                    fontweight="bold", va="center", ha="left", clip_on=False)
+
+        ax.text(0.01, 0.98, f"n = {n_sess} sessions", transform=ax.transAxes,
+                ha="left", va="top", fontsize=font_size - 1, color="0.3")
+
+        ax.set_xlabel("Time from stimulus onset (ms)")
+        ax.set_ylabel(ylabel)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+
+        # ---- significance strip ----
+        for i, comp in enumerate(comparisons):
+            y_row = n_rows - i
+            lab, c = row_style[comp]
+            mask = np.asarray(sig_results[comp]["sig_mask"], dtype=bool).ravel()
+            for s0, e0 in _find_runs(mask):
+                x0 = max(t[s0] - dt / 2, xlim_ms[0])
+                x1 = min(t[e0] + dt / 2, xlim_ms[1])
+                if x1 > x0:
+                    ax_s.hlines(y_row, x0, x1, color=c, lw=3)
+            ax_s.text(-0.01, y_row, lab, color=c, ha="right", va="center",
+                      fontsize=font_size - 1, transform=ax_s.get_yaxis_transform())
+        ax_s.set_ylim(0.4, n_rows + 0.6)
+        ax_s.axis("off")
+
+    return fig, ax

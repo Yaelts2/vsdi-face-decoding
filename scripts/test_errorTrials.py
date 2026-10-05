@@ -267,7 +267,7 @@ if len(error_acc_list) > 0:
 
     # ---- windowed test: gap before phase 2 (session-mean based, with built-in plot) ----
     window_result_acc = etf.test_window_average(
-        correct_acc_list, error_acc_list, centers_ref, window=(38, 45), null_value=0.5,
+        correct_acc_list, error_acc_list, centers_ref, window=(41, 45), null_value=0.5,
         label="accuracy", session_names=session_names, area_label=None, ylabel="Accuracy")
 
     # =====================================================================
@@ -293,22 +293,80 @@ if len(error_acc_list) > 0:
 
     # ---- windowed test: gap before phase 2 (session-mean based, with built-in plot) ----
     window_result_score = etf.test_window_average(
-        correct_score_list, error_score_list, centers_ref, window=(38, 45), null_value=0.0,
+        correct_score_list, error_score_list, centers_ref, window=(41, 45), null_value=0.0,
         label="score", session_names=session_names, area_label=None, ylabel="Score")
 
     # =====================================================================
     # SLIDING-WINDOW COHEN'S D (pooled, session-level) -- ACCURACY & SCORE
     # =====================================================================
-    sliding_d_acc = etf.sliding_window_effect_size(correct_acc_list, error_acc_list, centers_ref,
-                                                     window_width=16, method="pooled")
-    etf.plot_sliding_window_effect_size(sliding_d_acc, area_label="Accuracy")
+    sliding_d_total = etf.sliding_window_effect_size(correct_acc_list, error_acc_list, centers_ref,
+                                                   window_width=5, sd_type="total")
+    sliding_d_within = etf.sliding_window_effect_size(correct_acc_list, error_acc_list, centers_ref,
+                                                        window_width=5, sd_type="within")
+
+    fig_cmp, ax_cmp = plt.subplots(figsize=(10, 4))
+    ax_cmp.plot(sliding_d_total["window_centers"], sliding_d_total["d_values"], label="total SD (all 32 values)")
+    ax_cmp.plot(sliding_d_within["window_centers"], sliding_d_within["d_values"], label="within-group pooled SD")
+    ax_cmp.axhline(0, color="k", lw=1)
+    ax_cmp.set_xlabel("Frame (window center)")
+    ax_cmp.set_ylabel("Cohen's d")
+    ax_cmp.legend()
+    
+    
 
     sliding_d_score = etf.sliding_window_effect_size(correct_score_list, error_score_list, centers_ref,
-                                                       window_width=16, method="pooled")
+                                                       window_width=5, sd_type="total")
     etf.plot_sliding_window_effect_size(sliding_d_score, area_label="Score")
 
 else:
     print("No sessions processed -- nothing to grand-average.")
+    
+    
+    
+    
+# =====================================================================
+# GRAND AVERAGE + STATS -- ACCURACY and SCORE (thesis figures)
+# Copy this block unchanged into any area's script; edit AREA_TAG only.
+# =====================================================================
+
+AREA_TAG  = "allareas"          # "allareas" | "V1" | "V2" | "V4"
+PLOT_KW   = dict(c_correct="#CC79A7", c_error="#8C8C8C", c_compare="#0072B2",
+                 font_size=11, figsize_cm=(17, 11), xlim_ms=(-100, 280))
+AREA_LBL  = None if AREA_TAG == "allareas" else AREA_TAG
+
+if len(error_acc_list) > 0:
+
+    # ---------------- ACCURACY ----------------
+    sig_results = etf.run_group_significance_tests(
+        correct_acc_list, error_acc_list, centers_ref, null_value=0.5)
+    for comp in ('correct_vs_error', 'correct_vs_chance', 'error_vs_chance'):
+        n_sig = sig_results[comp]['sig_mask'].sum()
+        n_valid = (~np.isnan(sig_results[comp]['p_raw'])).sum()
+        print(f"[{AREA_TAG} ACC] {comp}: {n_sig} significant out of {n_valid} valid timepoints")
+
+    fig, ax = etf.plot_correct_vs_error_thesis(
+        correct_acc_list, error_acc_list, centers_ref, sig_results,
+        ylabel="Decoding accuracy", chance=0.5, ylim=(0.4, 1.0), **PLOT_KW)
+
+    window_result_acc = etf.test_window_average(
+        correct_acc_list, error_acc_list, centers_ref, window=(41, 45), null_value=0.5,
+        label="accuracy", session_names=session_names, area_label=AREA_LBL, ylabel="Accuracy")
+
+    # ---------------- SCORE ----------------
+    sig_score_results = etf.run_group_significance_tests(
+        correct_score_list, error_score_list, centers_ref, null_value=0.0)
+    for comp in ('correct_vs_error', 'correct_vs_chance', 'error_vs_chance'):
+        n_sig = sig_score_results[comp]['sig_mask'].sum()
+        n_valid = (~np.isnan(sig_score_results[comp]['p_raw'])).sum()
+        print(f"[{AREA_TAG} SCORE] {comp}: {n_sig} significant out of {n_valid} valid timepoints")
+
+    fig2, ax2 = etf.plot_correct_vs_error_thesis(
+        correct_score_list, error_score_list, centers_ref, sig_score_results,
+        ylabel="Decision score (+ = true label)", chance=0.0, ylim=None, **PLOT_KW)
+
+    window_result_score = etf.test_window_average(
+        correct_score_list, error_score_list, centers_ref, window=(41, 45), null_value=0.0,
+        label="score", session_names=session_names, area_label=AREA_LBL, ylabel="Score")
 
 # keep all figures open until you're done looking
 plt.show(block=True)

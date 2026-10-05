@@ -1,30 +1,62 @@
 """
 loso_grand_model_functions.py
 
-All functions for the leave-one-session-out (LOSO) grand SVM decoding model.
-Kept separate from the main run script (loso_grand_model_main.py), which only
-defines the session list and calls these.
+All functions for the NESTED leave-one-face-out grand SVM decoding model
+(VSDI, face vs non-face). Used by two scripts:
+    loso_grand_model_main.py          - defines sessions/parameters, trains, saves the .npz
+    loso_grand_model_figures_main.py  - opens the saved .npz, prints stats, makes the figures
 
-Conventions matched to the existing single-session sliding-window pipeline:
-    ZERO_FRAME = 27, FRAME_DURATION_MS = 10
-    window_size=5, start_frame=1, stop_frame=100, step=1
-    centers = start + window_size // 2
-    FACE_LABEL = 1, NONFACE_LABEL = 0
-    baseline z-score: subtract per-trial baseline mean, divide by a pooled std
-    (zscore_dataset_pixelwise_trials pattern)
+Model structure
+---------------
+Outer loop (one iteration = one LEFT-OUT GROUP):
+    All datasets that show the SAME face image are taken out together (so the model never
+    trains on a face it is later tested on). 16 datasets / 12 faces -> 12 groups.
+Inner loop:
+    All remaining datasets are pooled and their TRIALS are mixed. A stratified 10-fold CV
+    over the pooled trials gives 10 models (~10% of the pooled trials left out per fold,
+    not one dataset per fold). Trials are split as units, so the frames of a trial never
+    straddle train and test.
+Each of the 10 models, in every sliding window, is tested on
+    (a) its own held-out ~10% of the pooled trials     -> inner_* (within-pool accuracy)
+    (b) every dataset of the left-out group             -> ho_*    (cross-dataset accuracy)
+so every left-out group gets 10 accuracies per window.
 
-NEW for the grand model (per your instruction): the pooled std is computed
-across all trials from all TRAINING sessions in a given LOSO fold (not per
-session). It is recomputed fresh for each held-out session, using only the
-15 training sessions -- the held-out session never contributes to the std
-used to scale itself, since that would leak test-set information into
-preprocessing. Flag if you actually want it computed once across all 16
-sessions regardless of fold; happy to switch.
+Decoding convention (same as sliding_window_decode_with_stats)
+--------------------------------------------------------------
+window_size=5, start_frame=1, stop_frame=100, step=1; centers = start + window_size // 2;
+each FRAME of a window is its own sample (trial = group); trial-level accuracy is the
+majority vote over the frames of a trial; one classifier per window.
+
+Z-score (same maths as zscore_dataset_pixelwise_trials)
+-------------------------------------------------------
+Per-trial baseline mean subtraction, then ONE std per pixel pooled across the baseline
+frames of ALL trials of ALL datasets (computed once, used for every fold). The std is
+accumulated dataset by dataset (sum / sum of squares in float64) instead of concatenating
+all datasets, which gives the same numbers with a fraction of the memory.
+
+Statistics
+----------
+The replication unit is the LEFT-OUT GROUP (12), never the 10 folds: the 10 models of a group
+share ~80% of their training trials and are tested on the same left-out trials, so they are
+not independent. Per group the 10 fold accuracies are averaged first. Group accuracy is the
+trial-weighted mean over the datasets of the group (= accuracy on the pooled trials of the
+group). Two-tailed Wilcoxon signed-rank vs chance, BH-FDR across post-stimulus windows.
+Within-pool (inner) accuracies of different groups come from heavily overlapping pools, so
+they are shown descriptively and are not tested.
 """
 
-import numpy as np
+import datetime
+import json
+import os
+import time
+import warnings
 from pathlib import Path
-from sklearn.svm import LinearSVC
+
+import numpy as np
+import matplotlib.pyplot as plt
+from joblib import Parallel, delayed
+from scipy.stats import wilcoxon
+from sklearn.model_selection import StratifiedKFold
 
 ZERO_FRAME = 27
 FRAME_DURATION_MS = 10.0
@@ -32,51 +64,9 @@ FACE_LABEL = 1
 NONFACE_LABEL = 0
 
 
-# ---------------------------------------------------------------------------
-# Loading
-# ---------------------------------------------------------------------------
-def load_session_raw(face_file, nonface_file, data_dir):
-    """
-    Load one session's face and non-face condsXn matrices and combine them.
-
-    face_file, nonface_file : str, filenames like 'condsXn1_030209a.npy'
-    data_dir : str or Path, folder containing the .npy files
-
-    Returns
-    -------
-    X : ndarray (pixels, frames, trials)
-    y : ndarray (trials,) -- FACE_LABEL / NONFACE_LABEL
-    """
-    data_dir = Path(data_dir)
-    X_face = np.load(data_dir / face_file)
-    X_non = np.load(data_dir / nonface_file)
-
-    n = min(X_face.shape[2], X_non.shape[2])
-    X_face = X_face[:, :, :n]
-    X_non = X_non[:, :, :n]
-
-    X = np.concatenate([X_face, X_non], axis=2)
-    y = np.array([FACE_LABEL] * n + [NONFACE_LABEL] * n)
-    return X, y
-
-
-def load_all_sessions(sessions, data_dir):
-    """
-    sessions : list of dict, each {'id': str, 'face_file': str, 'nonface_file': str}
-    Returns list of dict, each {'id', 'X' (pixels,frames,trials), 'y' (trials,)}
-    """
-    loaded = []
-    for sess in sessions:
-        X, y = load_session_raw(sess['face_file'], sess['nonface_file'], data_dir)
-        loaded.append({'id': sess['id'], 'X': X, 'y': y})
-        print(f"  loaded {sess['id']}: X={X.shape}, n_face={int((y == FACE_LABEL).sum())}, "
-              f"n_nonface={int((y == NONFACE_LABEL).sum())}")
-    return loaded
-
-
-# ---------------------------------------------------------------------------
-# Pixel-wise z-score (pooled std) -- exact single-session function, verbatim
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 1. Loading and z-scoring
+# ===========================================================================
 def zscore_dataset_pixelwise_trials(X, baseline_frames=(1, 24), eps: float = 1e-8, ddof: int = 0):
     """
     Updated Pixel-wise Z-score:
@@ -84,10 +74,9 @@ def zscore_dataset_pixelwise_trials(X, baseline_frames=(1, 24), eps: float = 1e-
     2. Calculate STD of those 'mean-centered' baseline segments pooled across trials.
     3. Divide by that pooled STD.
 
-    Unmodified from the single-session pipeline. Used as-is when you want to
-    z-score one session on its own. For the LOSO grand model, see
-    baseline_center / pooled_std_across_sessions below, which reproduce this
-    exact same math but pool the std across multiple sessions' trials.
+    Verbatim single-array reference function (kept for checking and for z-scoring one
+    dataset on its own). load_all_datasets() below does the same maths with the std pooled
+    over all trials of all datasets, without building one huge array.
     """
     X = np.asarray(X, dtype=float)
     pixels, frames, trials = X.shape
@@ -104,93 +93,131 @@ def zscore_dataset_pixelwise_trials(X, baseline_frames=(1, 24), eps: float = 1e-
     return X_z, mean_per_trial, std_pooled
 
 
-def baseline_center(X, baseline_frames=(1, 24)):
+def load_session_raw(face_file, nonface_file, data_dir, stop_frame=100, dtype=np.float32):
     """
-    Step 1-2 of zscore_dataset_pixelwise_trials only: subtract each trial's
-    own baseline mean (per pixel). Per-trial, so this doesn't leak
-    information across sessions or folds -- safe to precompute once per
-    session before the LOSO fold loop.
+    Load one dataset's face and non-face condsXn matrices (pixels, 256, trials) and combine
+    them (truncated to the same number of trials; FACE_LABEL=1, NONFACE_LABEL=0).
+    Only frames [0, stop_frame) are read - nothing after stop_frame is ever used.
 
-    X : (pixels, frames, trials)
-    Returns X_centered : (pixels, frames, trials)
+    Returns X : (pixels, stop_frame, trials) in `dtype`, y : (trials,) int
     """
+    data_dir = Path(data_dir)
+    X_face = np.load(data_dir / face_file, mmap_mode='r')
+    X_non = np.load(data_dir / nonface_file, mmap_mode='r')
+    if X_face.shape[:2] != X_non.shape[:2]:
+        raise ValueError(f"{face_file} {X_face.shape} and {nonface_file} {X_non.shape} "
+                         f"differ in pixels/frames")
+    if X_face.shape[1] < stop_frame:
+        raise ValueError(f"{face_file} has only {X_face.shape[1]} frames (< stop_frame={stop_frame})")
+
+    n = min(X_face.shape[2], X_non.shape[2])
+    X = np.empty((X_face.shape[0], stop_frame, 2 * n), dtype=dtype)
+    X[:, :, :n] = X_face[:, :stop_frame, :n]
+    X[:, :, n:] = X_non[:, :stop_frame, :n]
+    y = np.array([FACE_LABEL] * n + [NONFACE_LABEL] * n, dtype=int)
+    return X, y
+
+
+def baseline_center_inplace(X, baseline_frames=(1, 24)):
+    """Subtract each trial's own baseline mean (per pixel), in place. X: (pixels, frames, trials)."""
     start, end = baseline_frames
-    mean_per_trial = X[:, start:end, :].mean(axis=1, keepdims=True)
-    return X - mean_per_trial
+    X -= X[:, start:end, :].mean(axis=1, keepdims=True, dtype=np.float64)
+    return X
 
 
-def pooled_std_across_sessions(centered_sessions, baseline_frames=(1, 24), eps=1e-8, ddof=0):
+def load_all_datasets(sessions, data_dir, baseline_frames=(1, 24), stop_frame=100,
+                      eps=1e-8, ddof=0, dtype=np.float32, verbose=True):
     """
-    Step 3-4 of zscore_dataset_pixelwise_trials, but pooling the centered
-    baseline across trials from MULTIPLE sessions instead of one session.
+    Load every dataset, subtract each trial's baseline mean, and divide by ONE std per pixel
+    pooled across the baseline frames of ALL trials of ALL datasets.
 
-    This is mathematically identical to concatenating the raw trials from
-    all these sessions along the trial axis and calling
-    zscore_dataset_pixelwise_trials() once on the combined array -- just
-    done from the already-centered per-session data so centering isn't
-    redone on every fold.
-
-    centered_sessions : list of ndarray (pixels, frames, trials), already
-        baseline-centered (output of baseline_center)
-    Returns std_pooled : (pixels, 1, 1)
-    """
-    start, end = baseline_frames
-    baseline_chunks = [Xc[:, start:end, :] for Xc in centered_sessions]
-    pooled = np.concatenate(baseline_chunks, axis=2)  # (pixels, n_baseline_frames, total_trials_all_sessions)
-    std_pooled = pooled.std(axis=(1, 2), keepdims=True, ddof=ddof)
-    return np.maximum(std_pooled, eps)
-
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Frame-as-samples helpers -- local equivalents of your fe.frames_as_samples /
-# cv.majority_vote_trial_predictions, since each window's samples here are
-# individual FRAMES (not window-averaged pixels), same as your main
-# sliding_window_decode_with_stats.
-# ---------------------------------------------------------------------------
-def frames_as_samples(X_win, y_trials, trial_axis=2, frame_axis=1, pixel_axis=0):
-    """
-    Flatten a (pixels, window_size, trials) window into frame-level samples:
-    each frame of each trial becomes its own sample, carrying that trial's
-    label, with a group id equal to the trial index for majority-vote
-    aggregation afterward.
-
+    sessions : list of dict {'id', 'face_id', 'scramble', 'face_file', 'nonface_file'}
     Returns
     -------
-    X_frames : (trials * window_size, pixels)
-    y_frames : (trials * window_size,)
-    groups   : (trials * window_size,) -- trial index per frame-sample
+    datasets : list of dict {'id', 'face_id', 'scramble',
+                             'X' : (trials, frames, pixels) z-scored, C-contiguous, `dtype`,
+                             'y' : (trials,)}
+    std_pooled : (pixels,) float64 - the pooled std that was used (before the eps floor)
     """
-    X_moved = np.moveaxis(X_win, [trial_axis, frame_axis, pixel_axis], [0, 1, 2])  # (trials, window, pixels)
-    n_trials, n_frames_win, n_pixels = X_moved.shape
-    X_frames = X_moved.reshape(n_trials * n_frames_win, n_pixels)
-    y_frames = np.repeat(np.asarray(y_trials), n_frames_win)
-    groups = np.repeat(np.arange(n_trials), n_frames_win)
-    return X_frames, y_frames, groups
+    start, end = baseline_frames
+    centered = []
+    s1 = s2 = None
+    n_total = 0
+
+    for sess in sessions:
+        X, y = load_session_raw(sess['face_file'], sess['nonface_file'], data_dir, stop_frame, dtype)
+        if not np.isfinite(X).all():
+            raise ValueError(f"Dataset {sess['id']} contains NaN/Inf values")
+        baseline_center_inplace(X, baseline_frames)
+
+        B = X[:, start:end, :].astype(np.float64)
+        if s1 is None:
+            s1 = np.zeros(X.shape[0])
+            s2 = np.zeros(X.shape[0])
+        s1 += B.sum(axis=(1, 2))
+        s2 += (B ** 2).sum(axis=(1, 2))
+        n_total += B.shape[1] * B.shape[2]
+        del B
+
+        centered.append((sess, X, y))
+        if verbose:
+            print(f"  loaded {sess['id']} (face {sess.get('face_id')}, {sess.get('scramble', '')}): "
+                  f"{X.shape[0]} pixels, {X.shape[1]} frames, "
+                  f"{int((y == FACE_LABEL).sum())} face + {int((y == NONFACE_LABEL).sum())} non-face trials")
+
+    mean = s1 / n_total
+    var = (s2 - n_total * mean ** 2) / (n_total - ddof)
+    std_pooled = np.sqrt(np.maximum(var, 0.0))
+    divisor = np.maximum(std_pooled, eps).astype(dtype)[:, None, None]
+
+    datasets = []
+    z1 = z2 = 0.0
+    zn = 0
+    for i in range(len(centered)):
+        sess, X, y = centered[i]
+        centered[i] = None
+        X /= divisor
+
+        B = X[:, start:end, :].astype(np.float64)
+        z1 += float(B.sum())
+        z2 += float((B ** 2).sum())
+        zn += B.size
+        del B
+
+        Xt = np.ascontiguousarray(X.transpose(2, 1, 0))      # (trials, frames, pixels)
+        del X
+        datasets.append({'id': sess['id'], 'face_id': sess.get('face_id'),
+                         'scramble': sess.get('scramble', ''), 'X': Xt, 'y': y})
+
+    if verbose:
+        zmean = z1 / zn
+        zstd = float(np.sqrt(z2 / zn - zmean ** 2))
+        print(f"sanity check (all-datasets baseline, z-scored): mean={float(zmean):.4f}, "
+              f"std={zstd:.4f} (should be ~0, ~1); {n_total // (end - start)} trials pooled for the std")
+    return datasets, std_pooled
 
 
-def majority_vote_trial_predictions(y_pred, y_frames, groups):
+# ===========================================================================
+# 2. Groups, windows, frame samples
+# ===========================================================================
+def build_leave_out_groups(sessions):
     """
-    Collapse frame-level predictions to one prediction per trial by majority
-    vote across that trial's frames within the window.
+    One group per face image: all datasets showing the same face_id are left out together.
+    Returns list of dict {'name', 'face_id', 'dataset_idx'} sorted by face_id.
     """
-    trial_ids = np.unique(groups)
-    y_true_trial = np.empty(len(trial_ids), dtype=y_frames.dtype)
-    y_pred_trial = np.empty(len(trial_ids), dtype=y_pred.dtype)
-    for i, tid in enumerate(trial_ids):
-        mask = groups == tid
-        y_true_trial[i] = y_frames[mask][0]  # identical for every frame in a trial, by construction
-        vals, counts = np.unique(y_pred[mask], return_counts=True)
-        y_pred_trial[i] = vals[np.argmax(counts)]
-    return y_true_trial, y_pred_trial
+    face_ids = sorted({s['face_id'] for s in sessions})
+    groups = []
+    for fid in face_ids:
+        idx = [i for i, s in enumerate(sessions) if s['face_id'] == fid]
+        groups.append({'name': f"face {fid}", 'face_id': fid, 'dataset_idx': idx})
+    return groups
 
 
 def window_bounds(n_frames, window_size=5, start_frame=1, stop_frame=100, step=1):
     """
     Exact window-loop bounds from sliding_window_decode_with_stats:
     last_start = min(n_frames - window_size, stop_frame - window_size);
-    windows are [start:start+window_size) for start in
-    range(start_frame, last_start+1, step).
+    windows are [start, start+window_size) for start in range(start_frame, last_start+1, step).
     """
     stop_frame = min(int(stop_frame), n_frames)
     last_start = min(n_frames - window_size, stop_frame - window_size)
@@ -203,190 +230,874 @@ def centers_to_time_ms(centers, zero_frame=ZERO_FRAME, frame_duration_ms=FRAME_D
     return (np.asarray(centers) - zero_frame) * frame_duration_ms
 
 
-# ---------------------------------------------------------------------------
-# LOSO grand model
-# ---------------------------------------------------------------------------
-def run_loso_grand_model(sessions_data, make_estimator, window_size=5, start_frame=1, stop_frame=100, step=1,
-                          baseline_frames=(1, 24), verbose=True):
+def window_frame_samples(X_tfp, start, end):
     """
-    Leave-one-session-out grand model, matching sliding_window_decode_with_stats's
-    convention: each window's samples are individual FRAMES within that
-    window (not window-averaged pixels), with trial id as the group for
-    majority-vote trial-level accuracy.
-
-    The outer split here is session-level (LOSO) instead of GroupKFold within
-    one session: for each held-out session, one classifier per window is
-    trained on every frame from every trial in the other 15 sessions
-    (pooled), then evaluated on the held-out session's frames -- this is the
-    direct analogue of your "final_models" fit-on-everything step, just with
-    the held-out session excluded from that "everything".
-
-    Z-score: pooled std is computed ONCE across ALL trials from ALL sessions
-    (matching zscore_dataset_pixelwise_trials exactly, just pooled over every
-    session's trials instead of one session's), and reused as-is for every
-    fold -- not recomputed per fold from training sessions only.
-
-    sessions_data : list of dict {'id', 'X' (pixels,frames,trials), 'y' (trials,)}
-    make_estimator : callable -> fresh estimator each fit, e.g.
-        lambda: LinearSVC(C=1.0, max_iter=10000)
-
-    Returns
-    -------
-    results : dict
-        'session_ids'   : list[str]
-        'centers'       : ndarray (n_windows,)
-        'time_ms'       : ndarray (n_windows,)
-        'frame_acc'     : ndarray (n_sessions, n_windows) -- held-out frame-level accuracy
-        'trial_acc'     : ndarray (n_sessions, n_windows) -- held-out trial-level (majority vote) accuracy
-        'weights'       : list[list[ndarray]] -- weights[fold][window] -> (n_pixels,), fit on pooled training frames
-        'n_test_trials' : ndarray (n_sessions,)
-        'params'        : dict of the window/baseline params used
+    Frames-as-samples for one window. X_tfp : (trials, frames, pixels).
+    Returns (trials * (end-start), pixels) float64, trial-major: all frames of trial 0,
+    then all frames of trial 1, ... (same ordering as fe.frames_as_samples).
     """
-    session_ids = [s['id'] for s in sessions_data]
-    n_sessions = len(sessions_data)
-    n_frames_total = sessions_data[0]['X'].shape[1]
+    n_tr, _, n_pix = X_tfp.shape
+    return np.array(X_tfp[:, start:end, :], dtype=np.float64, order='C').reshape(n_tr * (end - start), n_pix)
 
-    starts = window_bounds(n_frames_total, window_size, start_frame, stop_frame, step)
+
+def majority_vote_trial(y_pred_frames, window_size):
+    """
+    One prediction per trial = majority over the window_size frames of the trial
+    (frames are trial-major and every trial has exactly window_size frames).
+    Labels are 0/1; use an odd window_size so there are no ties (a tie would give 0).
+    """
+    votes = np.asarray(y_pred_frames).reshape(-1, window_size).mean(axis=1)
+    return (votes > 0.5).astype(int)
+
+
+def make_inner_folds(pool_y_trials, n_folds, seed, window_size):
+    """
+    Stratified (face/non-face) K-fold over the pooled TRIALS of all non-left-out datasets.
+    Returns a list of dicts with the trial indices and the matching frame-sample rows.
+    """
+    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    ar = np.arange(window_size)
+    folds = []
+    for tr, te in skf.split(np.zeros(len(pool_y_trials)), pool_y_trials):
+        folds.append({
+            'train_trials': tr,
+            'test_trials': te,
+            'train_rows': (tr[:, None] * window_size + ar).ravel(),
+            'test_rows': (te[:, None] * window_size + ar).ravel(),
+        })
+    return folds
+
+
+# ===========================================================================
+# 3. Nested leave-one-face-out
+# ===========================================================================
+def _fit_eval_fold(make_estimator, X_pool, y_pool_frames, train_rows, test_rows, test_sets, window_size):
+    """
+    Fit one inner-fold model; evaluate on its own held-out rows and on each left-out dataset.
+    test_sets : list of (X_frames, y_frames) for the left-out datasets.
+    Returns (inner_frame_acc, inner_trial_acc, [(frame_acc, trial_acc) per left-out dataset], weights)
+    """
+    clf = make_estimator()
+    clf.fit(X_pool[train_rows], y_pool_frames[train_rows])
+
+    yt = y_pool_frames[test_rows]
+    yp = clf.predict(X_pool[test_rows])
+    inner_frame = float(np.mean(yp == yt))
+    inner_trial = float(np.mean(majority_vote_trial(yp, window_size) == yt.reshape(-1, window_size)[:, 0]))
+
+    ho = []
+    for X_te, y_te in test_sets:
+        yp = clf.predict(X_te)
+        frame = float(np.mean(yp == y_te))
+        trial = float(np.mean(majority_vote_trial(yp, window_size) == y_te.reshape(-1, window_size)[:, 0]))
+        ho.append((frame, trial))
+
+    return inner_frame, inner_trial, ho, np.asarray(clf.coef_, dtype=float).ravel()
+
+
+def _group_signature(params, group, datasets, test_idx, pool_idx, make_estimator):
+    return json.dumps({
+        'params': params,
+        'group': group['name'],
+        'test': [datasets[i]['id'] for i in test_idx],
+        'pool': [datasets[i]['id'] for i in pool_idx],
+        'n_trials': [int(len(datasets[i]['y'])) for i in range(len(datasets))],
+        'estimator': repr(make_estimator()),
+    }, sort_keys=True, default=str)
+
+
+def _save_checkpoint(path, signature, **arrays):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp.npz')
+    np.savez(tmp, signature=np.array(signature), **arrays)
+    tmp.replace(path)
+
+
+def _load_checkpoint(path, signature):
+    try:
+        with np.load(path, allow_pickle=False) as d:
+            if str(d['signature']) != signature:
+                return None
+            return {k: d[k] for k in d.files if k != 'signature'}
+    except Exception:
+        return None
+
+
+def _make_params(window_size, start_frame, stop_frame, step, n_folds, seed, make_estimator, extra_params=None):
+    params = {'window_size': int(window_size), 'start_frame': int(start_frame), 'stop_frame': int(stop_frame),
+              'step': int(step), 'n_folds': int(n_folds), 'seed': int(seed),
+              'estimator': repr(make_estimator())}
+    if extra_params:
+        params.update(extra_params)
+    return params
+
+
+def _process_window(datasets, pool_idx, test_idx, start, window_size, folds, y_pool_frames, y_test_frames,
+                    make_estimator, n_jobs):
+    """
+    Everything done for ONE window of ONE left-out group: build the pooled frame samples and the
+    left-out test sets, fit and evaluate the n_folds models (threads if n_jobs != 1).
+    Shared by run_nested_loso and estimate_runtime, so the benchmark times exactly the real code path.
+    Returns the list of _fit_eval_fold outputs, one per fold.
+    """
+    end = start + window_size
+    X_pool = np.concatenate([window_frame_samples(datasets[i]['X'], start, end) for i in pool_idx], axis=0)
+    test_sets = [(window_frame_samples(datasets[j]['X'], start, end), y_test_frames[jj])
+                 for jj, j in enumerate(test_idx)]
+    if n_jobs == 1:
+        out = [_fit_eval_fold(make_estimator, X_pool, y_pool_frames, f['train_rows'], f['test_rows'],
+                              test_sets, window_size) for f in folds]
+    else:
+        out = Parallel(n_jobs=n_jobs, backend='threading')(
+            delayed(_fit_eval_fold)(make_estimator, X_pool, y_pool_frames, f['train_rows'], f['test_rows'],
+                                    test_sets, window_size) for f in folds)
+    return out
+
+
+def run_nested_loso(datasets, groups, make_estimator, window_size=5, start_frame=1, stop_frame=100,
+                    step=1, n_folds=10, seed=0, n_jobs=1, checkpoint_dir=None,
+                    extra_params=None, verbose=True):
+    """
+    Nested leave-one-face-out grand model (see the module docstring).
+
+    datasets : output of load_all_datasets (z-scored, X: (trials, frames, pixels))
+    groups : output of build_leave_out_groups
+    make_estimator : callable -> fresh estimator, e.g. lambda: LinearSVC(C=0.0001, max_iter=10000)
+    n_jobs : threads used to fit the n_folds models of a window in parallel
+    checkpoint_dir : if given, every finished group is saved there and skipped on a re-run
+        (only if the parameters, datasets and estimator are identical)
+
+    Returns results dict (arrays):
+        'dataset_ids', 'dataset_face_ids', 'dataset_scramble', 'n_trials', 'group_of_dataset' (n_datasets)
+        'group_names', 'group_face_ids'                                                (n_groups)
+        'centers', 'time_ms'                                                           (n_windows)
+        'ho_frame_acc', 'ho_trial_acc'     (n_datasets, n_folds, n_windows) - left-out dataset accuracy
+        'inner_frame_acc', 'inner_trial_acc' (n_groups, n_folds, n_windows) - within-pool accuracy
+        'w_mean_windows', 'w_std_windows'  (n_groups, n_windows, n_pixels) float32 - mean / SD (ddof=1)
+                                           of the n_folds weight vectors of a group
+        'w_fold_corr'                      (n_groups, n_windows) - mean pairwise Pearson r between the
+                                           n_folds weight maps of a group
+        'params'                           dict
+    """
+    n_datasets = len(datasets)
+    n_groups = len(groups)
+    n_frames = datasets[0]['X'].shape[1]
+    n_pixels = datasets[0]['X'].shape[2]
+    if n_folds < 2:
+        raise ValueError("n_folds must be >= 2")
+    if window_size % 2 == 0:
+        warnings.warn("window_size is even: ties in the majority vote are assigned to class 0")
+
+    group_of_dataset = np.full(n_datasets, -1, dtype=int)
+    for g, group in enumerate(groups):
+        for i in group['dataset_idx']:
+            if group_of_dataset[i] != -1:
+                raise ValueError(f"dataset {datasets[i]['id']} is in more than one group")
+            group_of_dataset[i] = g
+    if (group_of_dataset < 0).any():
+        raise ValueError("some datasets are not in any group")
+
+    starts = window_bounds(n_frames, window_size, start_frame, stop_frame, step)
     centers = np.array([s + window_size // 2 for s in starts])
     n_windows = len(starts)
     time_ms = centers_to_time_ms(centers)
 
-    # Baseline-center once per session (per-trial, independent of fold)
-    centered_raw = {sess['id']: baseline_center(sess['X'], baseline_frames) for sess in sessions_data}
+    params = _make_params(window_size, start_frame, stop_frame, step, n_folds, seed, make_estimator, extra_params)
 
-    # Pooled std across ALL trials from ALL sessions (not per fold) -- same math as
-    # zscore_dataset_pixelwise_trials, just pooling the centered baseline across every
-    # session's trials at once, computed a single time up front.
-    std_pooled = pooled_std_across_sessions(list(centered_raw.values()), baseline_frames)  # (pixels,1,1)
+    inner_frame = np.full((n_groups, n_folds, n_windows), np.nan)
+    inner_trial = np.full((n_groups, n_folds, n_windows), np.nan)
+    ho_frame = np.full((n_datasets, n_folds, n_windows), np.nan)
+    ho_trial = np.full((n_datasets, n_folds, n_windows), np.nan)
+    w_mean = np.zeros((n_groups, n_windows, n_pixels), dtype=np.float32)
+    w_std = np.zeros((n_groups, n_windows, n_pixels), dtype=np.float32)
+    w_fold_corr = np.full((n_groups, n_windows), np.nan)
 
-    if verbose:
-        start_bl, end_bl = baseline_frames
-        all_baseline_z = np.concatenate(
-            [Xc[:, start_bl:end_bl, :] / std_pooled for Xc in centered_raw.values()], axis=2
-        )
-        print(f"sanity check (all-sessions baseline, z-scored): "
-              f"mean={np.nanmean(all_baseline_z):.4f}, std={np.nanstd(all_baseline_z):.4f} "
-              f"(should be ~0, ~1)")
-        del all_baseline_z
+    t_run = time.time()
+    n_computed = 0
+    for g, group in enumerate(groups):
+        test_idx = list(group['dataset_idx'])
+        pool_idx = [i for i in range(n_datasets) if i not in test_idx]
+        signature = _group_signature(params, group, datasets, test_idx, pool_idx, make_estimator)
+        ckpt_path = Path(checkpoint_dir) / f"group_{g:02d}.npz" if checkpoint_dir else None
 
-    # z-score every session once with the global pooled std (same transform for train and test)
-    z_sessions = {sid: Xc / std_pooled for sid, Xc in centered_raw.items()}
+        if ckpt_path is not None and ckpt_path.exists():
+            ck = _load_checkpoint(ckpt_path, signature)
+            if ck is not None:
+                inner_frame[g] = ck['inner_frame']
+                inner_trial[g] = ck['inner_trial']
+                ho_frame[test_idx] = ck['ho_frame']
+                ho_trial[test_idx] = ck['ho_trial']
+                w_mean[g] = ck['w_mean']
+                w_std[g] = ck['w_std']
+                w_fold_corr[g] = ck['w_fold_corr']
+                if verbose:
+                    print(f"[group {g + 1}/{n_groups}] {group['name']}: loaded from checkpoint")
+                continue
 
-    results = {
-        'session_ids': session_ids,
-        'centers': centers,
-        'time_ms': time_ms,
-        'frame_acc': np.zeros((n_sessions, n_windows)),
-        'trial_acc': np.zeros((n_sessions, n_windows)),
-        'weights': [[None] * n_windows for _ in range(n_sessions)],
-        'n_test_trials': np.array([len(s['y']) for s in sessions_data]),
-        'params': {
-            'window_size': window_size, 'start_frame': start_frame,
-            'stop_frame': stop_frame, 'step': step, 'baseline_frames': baseline_frames,
-        },
-    }
-
-    for fold_idx in range(n_sessions):
-        held_out_id = session_ids[fold_idx]
-        train_idx = [j for j in range(n_sessions) if j != fold_idx]
+        t_group = time.time()
+        pool_y = np.concatenate([datasets[i]['y'] for i in pool_idx])
+        y_pool_frames = np.repeat(pool_y, window_size)
+        folds = make_inner_folds(pool_y, n_folds, seed + g, window_size)
+        y_test_frames = [np.repeat(datasets[j]['y'], window_size) for j in test_idx]
 
         if verbose:
-            print(f"[fold {fold_idx + 1}/{n_sessions}] held-out session: {held_out_id}")
-
-        z_train_sessions = [z_sessions[session_ids[j]] for j in train_idx]
-        y_train_sessions = [sessions_data[j]['y'] for j in train_idx]
-        z_test = z_sessions[held_out_id]
-        y_test_trials = sessions_data[fold_idx]['y']
+            print(f"[group {g + 1}/{n_groups}] left out: {group['name']} "
+                  f"({', '.join(datasets[j]['id'] for j in test_idx)}) | pool: {len(pool_idx)} datasets, "
+                  f"{len(pool_y)} trials | {n_folds} folds x {n_windows} windows")
 
         for w, start in enumerate(starts):
-            end = start + window_size
+            out = _process_window(datasets, pool_idx, test_idx, start, window_size, folds,
+                                  y_pool_frames, y_test_frames, make_estimator, n_jobs)
 
-            X_frames_list, y_frames_list = [], []
-            for Xz, y_trials in zip(z_train_sessions, y_train_sessions):
-                X_win = Xz[:, start:end, :]
-                Xf, yf, _ = frames_as_samples(X_win, y_trials, trial_axis=2, frame_axis=1, pixel_axis=0)
-                X_frames_list.append(Xf)
-                y_frames_list.append(yf)
-            X_train = np.concatenate(X_frames_list, axis=0)
-            y_train = np.concatenate(y_frames_list, axis=0)
+            W = np.empty((n_folds, n_pixels))
+            for k, (i_frame, i_trial, ho, wvec) in enumerate(out):
+                inner_frame[g, k, w] = i_frame
+                inner_trial[g, k, w] = i_trial
+                for jj, j in enumerate(test_idx):
+                    ho_frame[j, k, w] = ho[jj][0]
+                    ho_trial[j, k, w] = ho[jj][1]
+                W[k] = wvec
+            w_mean[g, w] = W.mean(axis=0)
+            w_std[g, w] = W.std(axis=0, ddof=1)
+            with np.errstate(invalid='ignore', divide='ignore'):
+                c = np.corrcoef(W)
+            w_fold_corr[g, w] = float(np.nanmean(c[np.triu_indices(n_folds, 1)]))
 
-            X_win_test = z_test[:, start:end, :]
-            X_test_frames, y_test_frames, test_groups = frames_as_samples(
-                X_win_test, y_test_trials, trial_axis=2, frame_axis=1, pixel_axis=0
-            )
+            if verbose and ((w + 1) % 10 == 0 or w + 1 == n_windows):
+                print(f"    window {w + 1}/{n_windows} ({float(time_ms[w]):.0f} ms) | "
+                      f"{time.time() - t_group:.0f} s in this group")
 
-            clf = make_estimator()
-            clf.fit(X_train, y_train)
-            y_pred_frames = clf.predict(X_test_frames)
+        if ckpt_path is not None:
+            _save_checkpoint(ckpt_path, signature,
+                             inner_frame=inner_frame[g], inner_trial=inner_trial[g],
+                             ho_frame=ho_frame[test_idx], ho_trial=ho_trial[test_idx],
+                             w_mean=w_mean[g], w_std=w_std[g], w_fold_corr=w_fold_corr[g])
 
-            frame_acc = float(np.mean(y_pred_frames == y_test_frames))
-            y_true_trial, y_pred_trial = majority_vote_trial_predictions(y_pred_frames, y_test_frames, test_groups)
-            trial_acc = float(np.mean(y_true_trial == y_pred_trial))
+        n_computed += 1
+        if verbose:
+            elapsed = time.time() - t_run
+            remaining = (n_groups - g - 1) * elapsed / n_computed
+            ho_peak = float(np.nanmean(ho_trial[test_idx]))
+            print(f"    group done in {time.time() - t_group:.0f} s | mean left-out trial acc over all windows "
+                  f"{ho_peak:.3f} | elapsed {elapsed / 60:.1f} min, ~{remaining / 60:.1f} min left")
 
-            results['frame_acc'][fold_idx, w] = frame_acc
-            results['trial_acc'][fold_idx, w] = trial_acc
-            results['weights'][fold_idx][w] = np.asarray(clf.coef_).ravel().astype(float)
-
+    results = {
+        'dataset_ids': np.array([d['id'] for d in datasets]),
+        'dataset_face_ids': np.array([int(d['face_id']) for d in datasets]),
+        'dataset_scramble': np.array([str(d['scramble']) for d in datasets]),
+        'n_trials': np.array([len(d['y']) for d in datasets]),
+        'group_of_dataset': group_of_dataset,
+        'group_names': np.array([g['name'] for g in groups]),
+        'group_face_ids': np.array([int(g['face_id']) for g in groups]),
+        'centers': centers,
+        'time_ms': time_ms,
+        'ho_frame_acc': ho_frame,
+        'ho_trial_acc': ho_trial,
+        'inner_frame_acc': inner_frame,
+        'inner_trial_acc': inner_trial,
+        'w_mean_windows': w_mean,
+        'w_std_windows': w_std,
+        'w_fold_corr': w_fold_corr,
+        'params': params,
+    }
     return results
 
 
-# ---------------------------------------------------------------------------
-# Figures
-# ---------------------------------------------------------------------------
-def plot_loso_accuracy(results, metric='trial_acc', title=None, ax=None):
-    """
-    Mean +/- SEM accuracy across held-out sessions, per window, over time.
-    Sessions are the replication unit (matches your Wilcoxon convention).
+def _fmt_duration(sec):
+    sec = float(sec)
+    if sec < 90:
+        return f"{sec:.0f} s"
+    if sec < 5400:
+        return f"{sec / 60:.0f} min"
+    return f"{int(sec // 3600)} h {int(round((sec % 3600) / 60))} min"
 
-    metric : 'trial_acc' (majority-vote, default) or 'frame_acc'
-    """
-    import matplotlib.pyplot as plt
 
+def estimate_runtime(datasets, groups, make_estimator, window_size=5, start_frame=1, stop_frame=100, step=1,
+                     n_folds=10, seed=0, n_jobs=1, checkpoint_dir=None, extra_params=None,
+                     n_bench_windows=2, verbose=True):
+    """
+    Small run-time calculator. Times a few REAL windows (all n_folds models, the same code path and the same
+    n_jobs as the real run) on the largest pool and extrapolates to every window of every group that still has
+    to be computed (groups with a valid checkpoint are skipped, exactly as in run_nested_loso).
+    Takes about n_bench_windows x one window (seconds to a minute or two).
+
+    Returns dict: sec_per_window, n_windows, n_groups_todo, n_fits, total_sec.
+    """
+    n_datasets = len(datasets)
+    n_frames = datasets[0]['X'].shape[1]
+    n_pixels = datasets[0]['X'].shape[2]
+    starts = window_bounds(n_frames, window_size, start_frame, stop_frame, step)
+    n_windows = len(starts)
+    params = _make_params(window_size, start_frame, stop_frame, step, n_folds, seed, make_estimator, extra_params)
+
+    todo = []
+    for g, group in enumerate(groups):
+        test_idx = list(group['dataset_idx'])
+        pool_idx = [i for i in range(n_datasets) if i not in test_idx]
+        if checkpoint_dir is not None:
+            path = Path(checkpoint_dir) / f"group_{g:02d}.npz"
+            sig = _group_signature(params, group, datasets, test_idx, pool_idx, make_estimator)
+            if path.exists() and _load_checkpoint(path, sig) is not None:
+                continue
+        todo.append(g)
+
+    n_fits = len(todo) * n_folds * n_windows
+    result = {'sec_per_window': 0.0, 'n_windows': n_windows, 'n_groups_todo': len(todo),
+              'n_fits': n_fits, 'total_sec': 0.0}
+    print("=== Run-time estimate ===")
+    if not todo:
+        print(f"all {len(groups)} groups already have a valid checkpoint - nothing left to compute")
+        return result
+
+    g_b = min(todo, key=lambda g: len(groups[g]['dataset_idx']))        # largest pool = fewest left-out datasets
+    test_idx = list(groups[g_b]['dataset_idx'])
+    pool_idx = [i for i in range(n_datasets) if i not in test_idx]
+    pool_y = np.concatenate([datasets[i]['y'] for i in pool_idx])
+    y_pool_frames = np.repeat(pool_y, window_size)
+    folds = make_inner_folds(pool_y, n_folds, seed + g_b, window_size)
+    y_test_frames = [np.repeat(datasets[j]['y'], window_size) for j in test_idx]
+
+    bench_pos = np.linspace(0, n_windows - 1, n_bench_windows + 2)[1:-1].round().astype(int)
+    times = []
+    for pos in bench_pos:
+        t0 = time.time()
+        _process_window(datasets, pool_idx, test_idx, starts[int(pos)], window_size, folds,
+                        y_pool_frames, y_test_frames, make_estimator, n_jobs)
+        times.append(time.time() - t0)
+    sec_per_window = float(np.mean(times))
+    total_sec = sec_per_window * n_windows * len(todo)
+
+    n_conc = n_folds if n_jobs in (None, -1) else min(int(n_jobs), n_folds)
+    pool_gb = len(pool_y) * window_size * n_pixels * 8 / 1e9
+    data_gb = sum(d['X'].nbytes for d in datasets) / 1e9
+    finish = datetime.datetime.now() + datetime.timedelta(seconds=total_sec)
+
+    print(f"benchmark: {len(times)} windows of group '{groups[g_b]['name']}' (pool {len(pool_idx)} datasets, "
+          f"{len(pool_y)} trials), {n_folds} fold models each, n_jobs={n_jobs}: "
+          + ", ".join(f"{t:.1f} s" for t in times))
+    print(f"per window (all {n_folds} fold models): {sec_per_window:.1f} s")
+    print(f"still to run: {len(todo)} of {len(groups)} groups x {n_windows} windows = "
+          f"{len(todo) * n_windows:,} windows = {n_fits:,} fits")
+    print(f"estimated total: {_fmt_duration(total_sec)} ({total_sec / 3600:.1f} h), "
+          f"finishing around {finish.strftime('%a %H:%M')}")
+    print(f"memory (rough): data {data_gb:.1f} GB + about {pool_gb * (1 + 3 * n_conc):.1f} GB for the fits "
+          f"({n_conc} fits at a time)")
+    cores = os.cpu_count()
+    if cores is not None and n_conc > cores:
+        print(f"WARNING: n_jobs={n_jobs} but only {cores} CPU cores detected - lower N_JOBS")
+    print("(about +/-25%: groups that leave out two datasets have a smaller pool and run slightly faster, "
+          "and the first benchmark window includes warm-up)")
+
+    result.update({'sec_per_window': sec_per_window, 'total_sec': total_sec})
+    return result
+
+
+# ===========================================================================
+# 4. Saving / loading the model results
+# ===========================================================================
+def save_results(results, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    arrays = {k: v for k, v in results.items() if k != 'params'}
+    tmp = path.with_suffix('.tmp.npz')
+    np.savez(tmp, params_json=np.array(json.dumps(results['params'], default=str)), **arrays)
+    tmp.replace(path)
+    return path
+
+
+def load_results(path):
+    """Open a saved .npz and return the same dict that run_nested_loso returned."""
+    with np.load(path, allow_pickle=False) as d:
+        results = {k: d[k] for k in d.files if k != 'params_json'}
+        results['params'] = json.loads(str(d['params_json']))
+    for key in ('dataset_ids', 'dataset_scramble', 'group_names'):
+        results[key] = [str(x) for x in results[key]]
+    return results
+
+
+def save_figure(fig, out_dir, name, dpi=150):
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / name
+    fig.savefig(path, dpi=dpi, bbox_inches='tight')
+    return path
+
+
+# ===========================================================================
+# 5. Accuracy summaries and statistics
+# ===========================================================================
+def group_accuracy(results, metric='trial_acc', source='heldout'):
+    """
+    Accuracy per group and fold: (n_groups, n_folds, n_windows).
+    source='heldout' : accuracy on the left-out group = trial-weighted mean over its datasets
+    source='inner'   : accuracy on the model's own held-out ~10% of the pooled trials
+    metric : 'trial_acc' (majority vote) or 'frame_acc'
+    """
+    if source == 'inner':
+        return results[f'inner_{metric}']
+    acc = results[f'ho_{metric}']
+    n_tr = np.asarray(results['n_trials'], dtype=float)
+    g_of_d = np.asarray(results['group_of_dataset'])
+    n_groups = int(g_of_d.max()) + 1
+    out = np.zeros((n_groups,) + acc.shape[1:])
+    for g in range(n_groups):
+        idx = np.where(g_of_d == g)[0]
+        out[g] = np.tensordot(n_tr[idx] / n_tr[idx].sum(), acc[idx], axes=(0, 0))
+    return out
+
+
+def group_curves(results, metric='trial_acc', source='heldout'):
+    """(n_groups, n_windows): accuracy averaged over the folds of each group (one number per group)."""
+    return group_accuracy(results, metric, source).mean(axis=1)
+
+
+def _bh_fdr(p):
+    """Benjamini-Hochberg adjusted p-values (q-values)."""
+    p = np.asarray(p, dtype=float)
+    n = len(p)
+    order = np.argsort(p)
+    ranked = p[order] * n / np.arange(1, n + 1)
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    q = np.empty(n)
+    q[order] = np.minimum(ranked, 1.0)
+    return q
+
+
+def _wilcoxon_p(d):
+    """Two-tailed Wilcoxon signed-rank p-value on differences d."""
+    d = np.asarray(d, dtype=float)
+    if np.allclose(d, 0):
+        return 1.0
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        try:
+            return float(wilcoxon(d, alternative='two-sided', method='auto').pvalue)
+        except TypeError:  # older scipy without the `method` argument
+            return float(wilcoxon(d, alternative='two-sided').pvalue)
+
+
+def accuracy_stats_vs_chance(curves, time_ms, chance=0.5, alpha=0.05):
+    """
+    curves : (n_groups, n_windows), one value per left-out group.
+    Per-window Wilcoxon signed-rank vs chance; BH-FDR across post-stimulus windows (time_ms >= 0).
+    Returns dict of (n_windows,) arrays: mean, sem, p, q (nan pre-stimulus), sig, post.
+    """
+    n_units, n_windows = curves.shape
+    p = np.array([_wilcoxon_p(curves[:, w] - chance) for w in range(n_windows)])
+    post = np.asarray(time_ms) >= 0
+    q = np.full(n_windows, np.nan)
+    q[post] = _bh_fdr(p[post])
+    sig = np.zeros(n_windows, dtype=bool)
+    sig[post] = q[post] < alpha
+    return {'mean': curves.mean(axis=0), 'sem': curves.std(axis=0, ddof=1) / np.sqrt(n_units),
+            'p': p, 'q': q, 'sig': sig, 'post': post}
+
+
+def first_sustained_significance(sig, time_ms, min_run=3):
+    """time_ms of the first window starting a run of >= min_run consecutive significant windows, else None."""
+    run = 0
+    for i, s in enumerate(sig):
+        run = run + 1 if s else 0
+        if run >= min_run:
+            return float(time_ms[i - min_run + 1])
+    return None
+
+
+def find_peak_window(mean_curve, time_ms):
+    """Index of the post-stimulus window with the highest value."""
+    post_idx = np.where(np.asarray(time_ms) >= 0)[0]
+    return int(post_idx[np.argmax(np.asarray(mean_curve)[post_idx])])
+
+
+def print_summary(results, metric='trial_acc', chance=0.5, alpha=0.05, min_run=3):
     time_ms = results['time_ms']
-    acc = results[metric]  # (n_sessions, n_windows)
-    mean_acc = acc.mean(axis=0)
-    sem_acc = acc.std(axis=0, ddof=1) / np.sqrt(acc.shape[0])
+    ho = group_curves(results, metric, 'heldout')
+    inner = group_curves(results, metric, 'inner')
+    stats = accuracy_stats_vs_chance(ho, time_ms, chance, alpha)
+    peak = find_peak_window(stats['mean'], time_ms)
+    onset = first_sustained_significance(stats['sig'], time_ms, min_run)
+    n_folds = results['ho_trial_acc'].shape[1]
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
-    if title is None:
-        title = f"LOSO grand model accuracy ({metric})"
+    print(f"--- left-out groups, {metric} ---")
+    print(f"groups: {ho.shape[0]}, windows: {ho.shape[1]}, folds per group: {n_folds}")
+    print(f"peak (post-stimulus): {float(time_ms[peak]):.0f} ms, left-out acc = "
+          f"{float(stats['mean'][peak]):.3f} +/- {float(stats['sem'][peak]):.3f} SEM "
+          f"(n={ho.shape[0]} groups), q = {float(stats['q'][peak]):.4g}")
+    print(f"within-pool acc (own held-out 10%) at the same window: {float(inner[:, peak].mean()):.3f}")
+    print(f"significant post-stimulus windows (BH-FDR q<{alpha}): "
+          f"{int(stats['sig'].sum())} / {int(stats['post'].sum())}")
+    if onset is None:
+        print(f"no run of >= {min_run} consecutive significant windows")
+    else:
+        print(f"first run of >= {min_run} consecutive significant windows starts at {onset:.0f} ms")
 
-    ax.plot(time_ms, mean_acc, color='black', lw=2, label='mean across sessions')
-    ax.fill_between(time_ms, mean_acc - sem_acc, mean_acc + sem_acc, color='black', alpha=0.2, label='SEM')
-    ax.axhline(0.5, color='gray', ls='--', lw=1, label='chance')
-    ax.axvline(0, color='red', ls='--', lw=1, label='stimulus onset')
-    ax.set_xlabel('Time from stimulus onset (ms)')
-    ax.set_ylabel('Held-out session accuracy')
-    ax.set_title(title)
-    ax.legend(loc='lower right', fontsize=8)
-    ax.set_ylim(0, 1)
-    return ax
+    per_fold = group_accuracy(results, metric, 'heldout')[:, :, peak]       # (n_groups, n_folds)
+    n_ds = np.bincount(np.asarray(results['group_of_dataset']))
+    print(f"per left-out group at {float(time_ms[peak]):.0f} ms (mean +/- SD over the {n_folds} fold models):")
+    for g, name in enumerate(results['group_names']):
+        print(f"   {name:<9} ({int(n_ds[g])} dataset{'s' if n_ds[g] > 1 else ' '}): "
+              f"{float(per_fold[g].mean()):.3f} +/- {float(per_fold[g].std(ddof=1)):.3f}")
 
 
-def plot_loso_session_heatmap(results, metric='trial_acc', title=None, ax=None):
+# ===========================================================================
+# 6. Accuracy figures
+# ===========================================================================
+def plot_heldout_accuracy(results, metric='trial_acc', chance=0.5, alpha=0.05, title=None, ax=None):
     """
-    Heatmap: sessions x windows, accuracy. Lets you spot sessions that
-    behave very differently from the rest of the grand model.
-
-    metric : 'trial_acc' (majority-vote, default) or 'frame_acc'
+    Accuracy on the LEFT-OUT group over time: thin line per group (mean of its fold models),
+    thick line = mean +/- SEM across groups, black squares = windows significantly above/below
+    chance (Wilcoxon over groups, BH-FDR across post-stimulus windows).
+    Returns (fig, stats).
     """
-    import matplotlib.pyplot as plt
-
     time_ms = results['time_ms']
-    acc = results[metric]
-    if title is None:
-        title = f"Per-session accuracy over time ({metric})"
+    curves = group_curves(results, metric, 'heldout')
+    stats = accuracy_stats_vs_chance(curves, time_ms, chance, alpha)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(9, 5))
+    else:
+        fig = ax.figure
 
+    for g in range(curves.shape[0]):
+        ax.plot(time_ms, curves[g], color='gray', lw=0.6, alpha=0.5)
+    ax.plot(time_ms, stats['mean'], color='black', lw=2.2, label=f'mean across {curves.shape[0]} left-out groups')
+    ax.fill_between(time_ms, stats['mean'] - stats['sem'], stats['mean'] + stats['sem'],
+                    color='black', alpha=0.25, label='SEM')
+    ax.axhline(chance, color='gray', ls='--', lw=1, label='chance')
+    ax.axvline(0, color='red', ls='--', lw=1, label='stimulus onset')
+    ax.set_ylim(min(0.4, float(curves.min()) - 0.02), 1.06)
+    if stats['sig'].any():
+        ax.plot(time_ms[stats['sig']], np.full(int(stats['sig'].sum()), 1.03), 's', color='black', ms=3.5,
+                label=f'sig. vs chance (q<{alpha})')
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('Accuracy on the left-out group')
+    ax.set_title(title or f"Nested leave-one-face-out - left-out {metric}")
+    ax.legend(loc='lower right', fontsize=8)
+    return fig, stats
+
+
+def plot_inner_vs_heldout(results, metric='trial_acc', chance=0.5):
+    """
+    Within-pool accuracy (each model on its own held-out ~10% of the mixed pooled trials) vs accuracy
+    on the left-out face (never seen in training). Bands = SEM across the groups; the within-pool
+    curves of different groups come from heavily overlapping pools, so they are descriptive only.
+    """
+    time_ms = results['time_ms']
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for source, color, label in [('inner', 'tab:blue', 'within-pool (own held-out 10%)'),
+                                 ('heldout', 'tab:orange', 'left-out face (cross-dataset)')]:
+        curves = group_curves(results, metric, source)
+        mean = curves.mean(axis=0)
+        sem = curves.std(axis=0, ddof=1) / np.sqrt(curves.shape[0])
+        ax.plot(time_ms, mean, color=color, lw=2, label=label)
+        ax.fill_between(time_ms, mean - sem, mean + sem, color=color, alpha=0.25)
+    ax.axhline(chance, color='gray', ls='--', lw=1, label='chance')
+    ax.axvline(0, color='red', ls='--', lw=1, label='stimulus onset')
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('Accuracy')
+    ax.set_title(f"Within-pool vs left-out-face accuracy ({metric})")
+    ax.legend(loc='lower right', fontsize=8)
+    return fig
+
+
+def plot_generalization_gap(results, metric='trial_acc'):
+    """Within-pool minus left-out accuracy per group over time (descriptive): how much is lost on a new face."""
+    time_ms = results['time_ms']
+    gap = group_curves(results, metric, 'inner') - group_curves(results, metric, 'heldout')
+    mean = gap.mean(axis=0)
+    sem = gap.std(axis=0, ddof=1) / np.sqrt(gap.shape[0])
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    for g in range(gap.shape[0]):
+        ax.plot(time_ms, gap[g], color='gray', lw=0.6, alpha=0.5)
+    ax.plot(time_ms, mean, color='black', lw=2.2, label='mean across groups')
+    ax.fill_between(time_ms, mean - sem, mean + sem, color='black', alpha=0.25, label='SEM')
+    ax.axhline(0, color='gray', ls='--', lw=1)
+    ax.axvline(0, color='red', ls='--', lw=1, label='stimulus onset')
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('within-pool acc. - left-out acc.')
+    ax.set_title(f"Generalization gap to a new face ({metric})")
+    ax.legend(loc='upper left', fontsize=8)
+    return fig
+
+
+def plot_frame_vs_trial(results, title="Left-out face: frame-level vs trial-level accuracy"):
+    """Mean +/- SEM across groups of frame-level and trial-level (majority vote) accuracy."""
+    time_ms = results['time_ms']
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for metric, color, label in [('frame_acc', 'tab:blue', 'frame-level'),
+                                 ('trial_acc', 'tab:orange', 'trial-level (majority vote)')]:
+        curves = group_curves(results, metric, 'heldout')
+        mean = curves.mean(axis=0)
+        sem = curves.std(axis=0, ddof=1) / np.sqrt(curves.shape[0])
+        ax.plot(time_ms, mean, color=color, lw=2, label=label)
+        ax.fill_between(time_ms, mean - sem, mean + sem, color=color, alpha=0.25)
+    ax.axhline(0.5, color='gray', ls='--', lw=1, label='chance')
+    ax.axvline(0, color='red', ls='--', lw=1, label='stimulus onset')
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('Accuracy on the left-out group')
+    ax.set_title(title)
+    ax.legend(loc='lower right', fontsize=8)
+    return fig
+
+
+def plot_dataset_heatmap(results, metric='trial_acc'):
+    """Datasets x windows heatmap of left-out accuracy (mean over the fold models), rows ordered by group."""
+    time_ms = results['time_ms']
+    acc = results[f'ho_{metric}'].mean(axis=1)                       # (n_datasets, n_windows)
+    g_of_d = np.asarray(results['group_of_dataset'])
+    order = np.lexsort((np.arange(len(g_of_d)), g_of_d))
+    acc = acc[order]
+    labels = [f"{results['dataset_ids'][i]} | face {int(results['dataset_face_ids'][i])} | "
+              f"{results['dataset_scramble'][i]}" for i in order]
+    n = len(order)
+
+    fig, ax = plt.subplots(figsize=(10, 0.38 * n + 2))
     im = ax.imshow(acc, aspect='auto', vmin=0, vmax=1, cmap='viridis',
-                    extent=[time_ms[0], time_ms[-1], len(results['session_ids']), 0])
-    ax.set_yticks(np.arange(len(results['session_ids'])) + 0.5)
-    ax.set_yticklabels(results['session_ids'], fontsize=7)
+                   extent=[time_ms[0], time_ms[-1], n, 0])
+    ax.set_yticks(np.arange(n) + 0.5)
+    ax.set_yticklabels(labels, fontsize=7)
+    boundaries = np.where(np.diff(g_of_d[order]) != 0)[0] + 1
+    for b in boundaries:
+        ax.axhline(b, color='white', lw=1.2)
     ax.axvline(0, color='red', ls='--', lw=1)
     ax.set_xlabel('Time from stimulus onset (ms)')
-    ax.set_title(title)
-    plt.colorbar(im, ax=ax, label='accuracy')
-    return ax
+    ax.set_title(f"Left-out accuracy per dataset ({metric}); white lines separate the left-out groups")
+    fig.colorbar(im, ax=ax, label='accuracy')
+    return fig
+
+
+def plot_peak_window_groups(results, metric='trial_acc', chance=0.5):
+    """Left-out accuracy of every group at the peak post-stimulus window: mean +/- SD over its fold models."""
+    time_ms = results['time_ms']
+    mean_curve = group_curves(results, metric, 'heldout').mean(axis=0)
+    peak = find_peak_window(mean_curve, time_ms)
+    per_fold = group_accuracy(results, metric, 'heldout')[:, :, peak]
+    means = per_fold.mean(axis=1)
+    sds = per_fold.std(axis=1, ddof=1)
+    n_ds = np.bincount(np.asarray(results['group_of_dataset']))
+    order = np.argsort(means)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.errorbar(np.arange(len(order)), means[order], yerr=sds[order], fmt='o', color='black', capsize=3)
+    ax.axhline(chance, color='gray', ls='--', lw=1, label='chance')
+    ax.axhline(float(means.mean()), color='tab:orange', lw=1.5, label=f'mean = {float(means.mean()):.3f}')
+    ax.set_xticks(np.arange(len(order)))
+    ax.set_xticklabels([f"{results['group_names'][i]}\n({int(n_ds[i])} ds)" for i in order], fontsize=8)
+    ax.set_ylim(min(0.4, float((means - sds).min()) - 0.03), 1.02)
+    ax.set_ylabel('Accuracy on the left-out group')
+    ax.set_title(f"{metric} per left-out group at the peak window ({float(time_ms[peak]):.0f} ms); "
+                 f"bars = SD over the fold models")
+    ax.legend(loc='lower right', fontsize=8)
+    return fig
+
+
+def plot_fold_spread(results, metric='trial_acc'):
+    """SD over the fold models of the left-out accuracy over time: sensitivity to which ~90% of the trials trained the model."""
+    time_ms = results['time_ms']
+    sd = group_accuracy(results, metric, 'heldout').std(axis=1, ddof=1)       # (n_groups, n_windows)
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    for g in range(sd.shape[0]):
+        ax.plot(time_ms, sd[g], color='gray', lw=0.6, alpha=0.6)
+    ax.plot(time_ms, sd.mean(axis=0), color='black', lw=2.2, label='mean across groups')
+    ax.axvline(0, color='red', ls='--', lw=1, label='stimulus onset')
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('SD over fold models')
+    ax.set_title(f"Spread of the left-out accuracy across the fold models ({metric})")
+    ax.legend(loc='upper left', fontsize=8)
+    return fig
+
+
+# ===========================================================================
+# 7. Weight figures
+# ===========================================================================
+def _grand_mean_weights(results):
+    """(n_windows, n_pixels): mean over the left-out groups of the group-mean weight maps."""
+    return results['w_mean_windows'].astype(float).mean(axis=0)
+
+
+def _pix_to_img(w):
+    n = w.shape[-1]
+    side = int(round(np.sqrt(n)))
+    if side * side != n:
+        raise ValueError(f"{n} pixels is not a perfect square")
+    return np.asarray(w, dtype=float).reshape(side, side)   # C-order == MATLAB reshape(v,100,100)'
+
+
+def plot_weight_maps(results, times_ms=(-100, 0, 50, 100, 150, 200, 300, 400), include_peak=True,
+                     metric='trial_acc', ncols=4, clip_percentile=99, cmap='RdBu_r'):
+    """Grid of the grand-mean weight map (mean over groups of the fold-mean maps) at chosen times, shared symmetric scale."""
+    time_ms = results['time_ms']
+    M = _grand_mean_weights(results)
+
+    idxs, labels = [], []
+    for t in times_ms:
+        i = int(np.argmin(np.abs(time_ms - t)))
+        if i not in idxs:
+            idxs.append(i)
+            labels.append(f"{float(time_ms[i]):.0f} ms")
+    if include_peak:
+        p = find_peak_window(group_curves(results, metric, 'heldout').mean(axis=0), time_ms)
+        if p in idxs:
+            labels[idxs.index(p)] += " (peak acc.)"
+        else:
+            idxs.append(p)
+            labels.append(f"{float(time_ms[p]):.0f} ms (peak acc.)")
+
+    maps = [_pix_to_img(M[i]) for i in idxs]
+    vmax = float(np.percentile(np.abs(np.stack(maps)), clip_percentile))
+    nrows = int(np.ceil(len(maps) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.2 * ncols, 3.1 * nrows), squeeze=False)
+    im = None
+    for k, ax in enumerate(axes.ravel()):
+        if k < len(maps):
+            im = ax.imshow(maps[k], cmap=cmap, vmin=-vmax, vmax=vmax)
+            ax.set_title(labels[k], fontsize=10)
+        ax.axis('off')
+    fig.suptitle("Grand-mean SVM weight map (mean over left-out groups of the fold-mean maps)", fontsize=12)
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8, label='weight')
+    return fig
+
+
+def plot_group_weight_maps(results, window_ms=None, metric='trial_acc', ncols=4, clip_percentile=99, cmap='RdBu_r'):
+    """
+    One weight map per left-out group (mean of its fold models) at one window (default: the peak-accuracy
+    window), shared symmetric scale: does the decoder look the same whichever face was left out?
+    """
+    time_ms = results['time_ms']
+    if window_ms is None:
+        w = find_peak_window(group_curves(results, metric, 'heldout').mean(axis=0), time_ms)
+    else:
+        w = int(np.argmin(np.abs(time_ms - window_ms)))
+    maps = [_pix_to_img(results['w_mean_windows'][g, w]) for g in range(results['w_mean_windows'].shape[0])]
+    vmax = float(np.percentile(np.abs(np.stack(maps)), clip_percentile))
+    nrows = int(np.ceil(len(maps) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.2 * ncols, 3.1 * nrows), squeeze=False)
+    im = None
+    n_ds = np.bincount(np.asarray(results['group_of_dataset']))
+    for k, ax in enumerate(axes.ravel()):
+        if k < len(maps):
+            im = ax.imshow(maps[k], cmap=cmap, vmin=-vmax, vmax=vmax)
+            ax.set_title(f"left out: {results['group_names'][k]} ({int(n_ds[k])} ds)", fontsize=9)
+        ax.axis('off')
+    fig.suptitle(f"Weight map of each group's models at {float(time_ms[w]):.0f} ms", fontsize=12)
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8, label='weight')
+    return fig
+
+
+def plot_weight_norm_over_time(results):
+    """L2 norm of the fold-mean weight vector per window; mean +/- SD across the left-out groups."""
+    time_ms = results['time_ms']
+    norms = np.linalg.norm(results['w_mean_windows'].astype(float), axis=2)    # (n_groups, n_windows)
+    mean, sd = norms.mean(axis=0), norms.std(axis=0, ddof=1)
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    for g in range(norms.shape[0]):
+        ax.plot(time_ms, norms[g], color='gray', lw=0.6, alpha=0.6)
+    ax.plot(time_ms, mean, color='black', lw=2)
+    ax.fill_between(time_ms, mean - sd, mean + sd, color='black', alpha=0.25, label='SD across groups')
+    ax.axvline(0, color='red', ls='--', lw=1, label='stimulus onset')
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('||w||  (L2 norm)')
+    ax.set_title('Weight vector magnitude over time')
+    ax.legend(fontsize=8)
+    return fig
+
+
+def _corr_with_reference(W, ref):
+    """Pearson r between W[g, t, :] and ref[t, :] -> (n_groups, n_windows)."""
+    Wc = W - W.mean(axis=2, keepdims=True)
+    rc = ref - ref.mean(axis=1, keepdims=True)
+    num = np.einsum('gtp,tp->gt', Wc, rc)
+    den = np.linalg.norm(Wc, axis=2) * np.linalg.norm(rc, axis=1)[None, :]
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return num / den
+
+
+def plot_weight_stability(results):
+    """
+    Top: Pearson r between the weight maps of different left-out groups (mean and minimum over group pairs)
+    and the mean r between the fold models of the same group (w_fold_corr).
+    Bottom: correlation of each group's map with the grand-mean map (row = left-out group).
+    """
+    time_ms = results['time_ms']
+    W = results['w_mean_windows'].astype(float)
+    n_groups, n_windows, _ = W.shape
+    iu = np.triu_indices(n_groups, 1)
+
+    pair_mean = np.empty(n_windows)
+    pair_min = np.empty(n_windows)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        for t in range(n_windows):
+            C = np.corrcoef(W[:, t, :])
+            pair_mean[t] = np.nanmean(C[iu])
+            pair_min[t] = np.nanmin(C[iu])
+    cm = _corr_with_reference(W, _grand_mean_weights(results))
+
+    fig = plt.figure(figsize=(10, 8.5))
+    gs = fig.add_gridspec(2, 2, width_ratios=[1, 0.03], height_ratios=[1, 1.5], wspace=0.04, hspace=0.12)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
+    cax = fig.add_subplot(gs[1, 1])
+    ax1.tick_params(labelbottom=False)
+    ax1.plot(time_ms, pair_mean, color='black', lw=2, label='between groups: mean pairwise r')
+    ax1.plot(time_ms, pair_min, color='tab:red', lw=1.2, ls='--', label='between groups: min pairwise r')
+    ax1.plot(time_ms, np.nanmean(results['w_fold_corr'], axis=0), color='tab:blue', lw=2,
+             label='within a group: mean r between the fold models')
+    ax1.axvline(0, color='red', ls='--', lw=1)
+    ax1.set_ylabel('Pearson r between weight maps')
+    ax1.set_title('Weight-map stability: between left-out groups and between fold models')
+    ax1.legend(fontsize=8, loc='lower right')
+
+    im = ax2.imshow(cm, aspect='auto', cmap='viridis', vmin=float(np.nanmin(cm)), vmax=1.0,
+                    extent=[time_ms[0], time_ms[-1], n_groups, 0])
+    ax2.set_yticks(np.arange(n_groups) + 0.5)
+    ax2.set_yticklabels(results['group_names'], fontsize=8)
+    ax2.axvline(0, color='red', ls='--', lw=1)
+    ax2.set_ylabel('Left-out group')
+    ax2.set_xlabel('Time from stimulus onset (ms)')
+    ax2.set_title("Correlation of each group's weight map with the grand-mean map")
+    fig.colorbar(im, cax=cax, label='Pearson r')
+    return fig
+
+
+def plot_weight_pattern_similarity(results):
+    """Window x window Pearson r of the grand-mean weight maps: does the spatial pattern change over time?"""
+    time_ms = results['time_ms']
+    M = _grand_mean_weights(results)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        C = np.corrcoef(M)
+    fig, ax = plt.subplots(figsize=(6.5, 5.5))
+    im = ax.imshow(C, cmap='RdBu_r', vmin=-1, vmax=1, extent=[time_ms[0], time_ms[-1], time_ms[-1], time_ms[0]])
+    ax.axvline(0, color='k', ls='--', lw=0.8)
+    ax.axhline(0, color='k', ls='--', lw=0.8)
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('Time from stimulus onset (ms)')
+    ax.set_title('Similarity of the grand-mean weight maps across time')
+    fig.colorbar(im, ax=ax, label='Pearson r')
+    return fig
+
+
+def plot_pixel_time_heatmap(results, normalize_rows=True, cmap='RdBu_r'):
+    """
+    Pixels x windows heatmap of the grand-mean weights, pixels sorted by the time of their peak |weight|.
+    normalize_rows divides each pixel by its own max |weight| (shows WHEN a pixel matters, not how much).
+    """
+    time_ms = results['time_ms']
+    P = _grand_mean_weights(results).T                                      # (n_pixels, n_windows)
+    P = P[np.argsort(np.argmax(np.abs(P), axis=1), kind='stable')]
+    if normalize_rows:
+        row_max = np.abs(P).max(axis=1, keepdims=True)
+        row_max[row_max == 0] = 1.0
+        P = P / row_max
+        vmax, label = 1.0, 'weight / max |weight| of the pixel'
+    else:
+        vmax, label = float(np.percentile(np.abs(P), 99)), 'weight'
+    fig, ax = plt.subplots(figsize=(9, 6))
+    im = ax.imshow(P, aspect='auto', cmap=cmap, vmin=-vmax, vmax=vmax,
+                   extent=[time_ms[0], time_ms[-1], P.shape[0], 0], interpolation='nearest')
+    ax.axvline(0, color='k', ls='--', lw=0.8)
+    ax.set_xlabel('Time from stimulus onset (ms)')
+    ax.set_ylabel('Pixels (sorted by time of peak |weight|)')
+    ax.set_title('Grand-mean weight of every pixel over time')
+    fig.colorbar(im, ax=ax, label=label)
+    return fig
