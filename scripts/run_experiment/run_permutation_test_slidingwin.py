@@ -36,10 +36,12 @@ RESULTS_ROOT = Path(r"C:\project\vsdi-face-decoding\results")
 # the REAL sliding-window model of this dataset
 RUN_DIR = RESULTS_ROOT / "sliding_window__110209a24_frame1-100__SVM_10foldCV____2026-06-14_12-01-00"   # <- EDIT
 
-# optional: the OLD permutation folder of the same model (no weights). With the same seed the
+# the OLD permutation folder of the same model (no weights), for check (c): with the same seed the
 # label permutations are identical, so the new null accuracies must equal the old ones exactly.
-# None = skip the check (e.g. 03/02 datasets that have no old run).
-OLD_PERM_DIR = None   # e.g. RESULTS_ROOT / "permutation_test_sliding_window" / "slidingwindow__perm100__seed42__2026-06-..."
+#   "auto" = search PERM_ROOT for an old run whose config.json points to RUN_DIR (recommended)
+#   None   = skip the check (e.g. 03/02 datasets that have no old run)
+#   or a full path to the folder
+OLD_PERM_DIR = "auto"
 
 N_PERMUTATIONS = 100
 PERM_SEED = 42          # keep 42 = same shuffles as the existing runs
@@ -52,6 +54,33 @@ ZERO_FRAME = 27         # frame 27 = 0 ms (same convention as the .mat export)
 FRAME_MS = 10
 
 PERM_ROOT = RESULTS_ROOT / "permutation_test_sliding_window"
+
+# =========================
+# 0) Resolve OLD_PERM_DIR NOW (fail fast - before hours of training, not after)
+# =========================
+if not RUN_DIR.exists():
+    raise FileNotFoundError(f"RUN_DIR not found: {RUN_DIR}")
+
+if isinstance(OLD_PERM_DIR, str) and OLD_PERM_DIR == "auto":
+    matches = []
+    for cfg_path in sorted(PERM_ROOT.glob("*/config.json")):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                c = json.load(f)
+        except Exception:
+            continue
+        same_model = Path(str(c.get("source_run_dir", ""))).name == RUN_DIR.name
+        if same_model and "null_weights" not in c and (cfg_path.parent / "perm_result.npz").exists():
+            matches.append((int(c.get("n_permutations", 0)), int(c.get("perm_seed", -1)), cfg_path.parent))
+    # must be the same seed; prefer the run with the same number of permutations
+    matches = [m for m in matches if m[1] == PERM_SEED]
+    same_n = [m for m in matches if m[0] == N_PERMUTATIONS]
+    OLD_PERM_DIR = (same_n or matches)[-1][2] if matches else None
+    print("Old permutation run for check (c):", OLD_PERM_DIR.name if OLD_PERM_DIR else "none found -> check skipped")
+elif OLD_PERM_DIR is not None:
+    OLD_PERM_DIR = Path(OLD_PERM_DIR)
+    if not (OLD_PERM_DIR / "perm_result.npz").exists():
+        raise FileNotFoundError(f"OLD_PERM_DIR has no perm_result.npz: {OLD_PERM_DIR}")
 
 # =========================
 # 1) Load the real model (config + results + ROI path)
@@ -121,13 +150,19 @@ if d_real > 1e-3 * float(np.max(np.abs(w_saved))):
 print(f"Check (b) null trial acc: mean {float(perm_result['null_trial_acc'].mean()):.3f}, "
       f"max of window means {float(perm_result['null_trial_acc'].mean(axis=0).max()):.3f} (should be ~0.5)")
 
-# (c) same shuffles as the old run
+# (c) same shuffles as the old run (never allowed to crash the run before saving)
+d_old = None
 if OLD_PERM_DIR is not None:
-    old = np.load(Path(OLD_PERM_DIR) / "perm_result.npz", allow_pickle=True)
-    d_old = float(np.max(np.abs(old["null_trial_acc"] - perm_result["null_trial_acc"])))
-    print(f"Check (c) null trial acc vs old run: max abs diff = {d_old:.3e} (should be 0)")
-    if d_old > 1e-9:
-        print("  WARNING: the shuffles differ from the old run (different seed/data/sklearn version?).")
+    try:
+        old = np.load(Path(OLD_PERM_DIR) / "perm_result.npz", allow_pickle=True)
+        a_old, a_new = np.asarray(old["null_trial_acc"]), np.asarray(perm_result["null_trial_acc"])
+        n = min(a_old.shape[0], a_new.shape[0])          # old run may have more permutations (e.g. 1000)
+        d_old = float(np.max(np.abs(a_old[:n] - a_new[:n])))
+        print(f"Check (c) null trial acc vs old run ({n} perms compared): max abs diff = {d_old:.3e} (should be 0)")
+        if d_old > 1e-9:
+            print("  WARNING: the shuffles differ from the old run (different seed/data/sklearn version?).")
+    except Exception as e:
+        print(f"Check (c) skipped - could not compare with the old run: {e}")
 
 # =========================
 # 6) Save (folder name carries the model token, so open_permutation_sliding.py finds the model .mat)
@@ -151,7 +186,9 @@ perm_config = {"source_run_dir": str(RUN_DIR),
                "svm_random_state": SVM_SEED,
                "null_weights": "w_mean_windows (mean over folds) of each shuffled model, ROI pixels only",
                "save_t_ms": list(SAVE_T_MS), "zero_frame": ZERO_FRAME, "frame_ms": FRAME_MS,
-               "check_real_weights_maxdiff": d_real}
+               "check_real_weights_maxdiff": d_real,
+               "old_perm_dir": str(OLD_PERM_DIR) if OLD_PERM_DIR else None,
+               "check_old_null_maxdiff": d_old}
 with open(save_dir / "config.json", "w", encoding="utf-8") as f:
     json.dump(perm_config, f, indent=2)
 
