@@ -185,6 +185,10 @@ def load_sliding_window_permutation(run_dir):
         "null_trial_std": data.get("null_trial_std"),
         "null_frame_mean": data.get("null_frame_mean"),
         "null_frame_std": data.get("null_frame_std"),
+        # null weights (only in runs made with save_weight_centers; None for older runs)
+        "null_w_mean": data["null_w_mean"] if "null_w_mean" in data.files else None,       # (n_perm, n_save, n_roi)
+        "null_w_centers": data["null_w_centers"] if "null_w_centers" in data.files else None,
+        "roi_mask": data["roi_mask"] if "roi_mask" in data.files else None,
         "config": config }
 
     return out

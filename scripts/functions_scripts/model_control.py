@@ -222,7 +222,8 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
                                     seed=42,
                                     return_null=False,
                                     return_perm_stats=False,
-                                    verbose=True,   
+                                    verbose=True,
+                                    save_weight_centers=None,   # window CENTERS whose null weights to keep (None = keep none)
                                     ):
     """
     Sliding-window permutation test that reuses the REAL decoding pipeline.
@@ -279,6 +280,18 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
     null_trial_folds = np.zeros((n_perm, n_windows, n_splits), dtype=float)
     
     perm_stats = [] if return_perm_stats else None
+
+    # -------- Optional: keep the null WEIGHTS (w_mean_windows = mean over folds) --------
+    # Only for the requested windows, to keep the file small. float32 is plenty for weights.
+    if save_weight_centers is not None:
+        save_weight_centers = np.asarray(save_weight_centers, dtype=int).ravel()
+        missing = np.setdiff1d(save_weight_centers, centers)
+        if missing.size:
+            raise ValueError(f"save_weight_centers not in the window centers: {missing}")
+        save_w_idx = np.array([int(np.where(centers == c)[0][0]) for c in save_weight_centers])
+        null_w_mean = np.zeros((n_perm, save_w_idx.size, n_pixels), dtype=np.float32)
+    else:
+        save_w_idx, null_w_mean = None, None
  
     #progress setup (10%)
     progress_every = max(1, n_perm // 10)
@@ -300,6 +313,8 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
         null_frame_curves[p, :] = np.asarray(perm_out["frame_acc_mean"], dtype=float)
         null_trial_curves[p, :] = np.asarray(perm_out["trial_acc_mean"], dtype=float)
         null_trial_folds[p, :, :] = np.asarray(perm_out["fold_trial_acc"], dtype=float)
+        if save_w_idx is not None:
+            null_w_mean[p] = np.asarray(perm_out["w_mean_windows"], dtype=np.float32)[save_w_idx]   # (n_save, n_pixels)
         
         
         if return_perm_stats:
@@ -361,6 +376,11 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
  
     if return_perm_stats:
         out["perm_stats"] = perm_stats
+
+    if save_w_idx is not None:
+        out["null_w_mean"] = null_w_mean              # (n_perm, n_save, n_pixels), same weights as Weights_acrossT
+        out["null_w_centers"] = save_weight_centers   # (n_save,) window centers of the saved weights
+        out["real_w_mean"] = np.asarray(real_out["w_mean_windows"], dtype=np.float32)[save_w_idx]  # recomputed real, for a check
  
     return out
 
