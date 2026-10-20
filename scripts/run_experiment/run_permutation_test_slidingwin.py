@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from datetime import datetime
+import time
 import json
 import numpy as np
 from scripts.functions_scripts import preprocessing_functions as pre
@@ -33,11 +34,20 @@ FRAME_MS = 10
 
 PERM_ROOT = RESULTS_ROOT / "permutation_test_sliding_window"
 
+T0 = time.perf_counter()
+
+
+def stamp(msg):
+    """print a step with the clock time and the time since the script started"""
+    el = time.perf_counter() - T0
+    print(f"[{datetime.now():%H:%M:%S} | +{int(el // 60)}m {int(el % 60):02d}s] {msg}", flush=True)
+
+
 # =========================
 # 1) Load the real model
 # =========================
+stamp(f"loading model {RUN_DIR.name}")
 config, real_results, ROI_mask_path = sr.load_experiment(RUN_DIR)
-print("Loaded run:", RUN_DIR.name)
 
 face_file = config["face_file"]
 nonface_file = config["nonface_file"]
@@ -53,11 +63,12 @@ make_estimator = lambda: cv.make_linear_svm(C=0.0001, max_iter=100000, random_st
 # =========================
 # 2) Rebuild the data exactly as in training
 # =========================
+stamp("loading + z-scoring data")
 X_trials, y_trials, _ = pre.build_X_y(face_file=face_file, nonface_file=nonface_file, data_dir=data_dir)
 X_z, _mean, _std = pre.zscore_dataset_pixelwise_trials(X_trials, baseline_frames=baseline)
 ROI_mask = np.asarray(np.load(ROI_mask_path), dtype=bool).ravel()
 X_roi = X_z[ROI_mask, :, :]
-print("X_roi:", X_roi.shape, " y:", y_trials.shape)
+stamp(f"data ready: X_roi {X_roi.shape}, {y_trials.size} trials")
 
 # =========================
 # 3) Windows to shuffle: centers from stimulus onset to +300 ms
@@ -68,7 +79,7 @@ keep = (t_ms_all >= T_MS[0]) & (t_ms_all <= T_MS[1])
 perm_centers = centers_all[keep]                                        # 26 ... 56
 perm_start = int(perm_centers[0]) - window_size // 2                    # first window start (24)
 perm_stop = int(perm_centers[-1]) - window_size // 2 + window_size      # end of last window (59)
-print(f"shuffling {perm_centers.size} windows: centers {perm_centers[0]}-{perm_centers[-1]} "
+stamp(f"shuffling {perm_centers.size} windows: centers {perm_centers[0]}-{perm_centers[-1]} "
       f"({T_MS[0]}-{T_MS[1]} ms), frames {perm_start}-{perm_stop}")
 
 # =========================
@@ -84,9 +95,12 @@ perm_result = mc.sliding_window_permutation_test(X_pix_frames_trials=X_roi, y_tr
 if not np.array_equal(perm_result["centers"], perm_centers):
     raise RuntimeError("window centers of the permutation run differ from the real model - check start/stop")
 
+stamp("permutation test done")
+
 # =========================
 # 5) Save
 # =========================
+stamp("saving")
 ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 token = RUN_DIR.name.split("__")[1]          # e.g. 110209a24_frame1-100
 save_dir = PERM_ROOT / f"slidingwindow__perm{N_PERMUTATIONS}__{token}__withWeights__{ts}"
@@ -121,4 +135,4 @@ np.savez_compressed(save_dir / "perm_result.npz",
                     null_w_centers=np.asarray(perm_result["null_w_centers"], dtype=int),           # (n_windows,) = centers
                     roi_mask=ROI_mask)                                                             # (10000,)
 
-print("Saved to:", save_dir)
+stamp(f"saved to {save_dir}")

@@ -10,6 +10,8 @@ from sklearn.metrics import accuracy_score
 from scripts.functions_scripts import feature_extraction as fe
 from scripts.functions_scripts import sliding_win as sw
 import warnings
+import time
+from datetime import datetime
 import numpy as np
 from statsmodels.stats.multitest import multipletests
 
@@ -210,6 +212,16 @@ def plot_permutation_test_trial(perm_data, bins=30, figsize=(7, 4), title=None):
 ######### sliding window
 
 
+def _fmt_sec(sec):
+    """seconds -> '1h 05m' / '4m 12s' / '8.3s' for progress prints"""
+    sec = float(sec)
+    if sec >= 3600:
+        return f"{int(sec // 3600)}h {int(sec % 3600 // 60):02d}m"
+    if sec >= 60:
+        return f"{int(sec // 60)}m {int(sec % 60):02d}s"
+    return f"{sec:.1f}s"
+
+
 def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, trials)
                                     y_trials,              # (trials,)
                                     make_estimator,        
@@ -260,6 +272,9 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
     rng = np.random.default_rng(seed)
  
     # -------- Real (non-permuted) decoding curve --------
+    t_start = time.perf_counter()
+    if verbose:
+        print(f"  [{datetime.now():%H:%M:%S}] real model: {n_windows} windows x {n_splits} folds ...", flush=True)
     real_out = sw.sliding_window_decode_with_stats(X_pix_frames_trials=X,
                                                 y_trials=y_trials,
                                                 make_estimator=make_estimator,
@@ -274,6 +289,11 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
  
     real_frame_curve = np.asarray(real_out["frame_acc_mean"], dtype=float)
     real_trial_curve = np.asarray(real_out["trial_acc_mean"], dtype=float)
+    if verbose:
+        t_real = time.perf_counter() - t_start
+        print(f"  [{datetime.now():%H:%M:%S}] real model done in {_fmt_sec(t_real)} "
+              f"-> {n_perm} shuffles expected ~{_fmt_sec(t_real * n_perm)}", flush=True)
+    t_perm0 = time.perf_counter()
  
     null_frame_curves = np.zeros((n_perm, n_windows), dtype=float)
     null_trial_curves = np.zeros((n_perm, n_windows), dtype=float)
@@ -326,12 +346,15 @@ def sliding_window_permutation_test(X_pix_frames_trials,   # (pixels, frames, tr
             })
  
         # -------- Progress printing (minimal logic) --------
-        if verbose and ((p + 1) % progress_every == 0 or (p + 1) == n_perm):
-            mean_frame = float(np.mean(null_frame_curves[p]))
+        if verbose and (p == 0 or (p + 1) % progress_every == 0 or (p + 1) == n_perm):
             mean_trial = float(np.mean(null_trial_curves[p]))
-            print(f"  Permutation {p + 1}/{n_perm} "
-                f"| mean_frame_acc={mean_frame:.4f} "
-                f"| mean_trial_acc={mean_trial:.4f}")
+            elapsed = time.perf_counter() - t_perm0
+            per_perm = elapsed / (p + 1)
+            left = per_perm * (n_perm - p - 1)
+            print(f"  [{datetime.now():%H:%M:%S}] shuffle {p + 1}/{n_perm} "
+                  f"| null trial acc {mean_trial:.3f} "
+                  f"| {_fmt_sec(per_perm)}/shuffle | elapsed {_fmt_sec(elapsed)} "
+                  f"| left ~{_fmt_sec(left)} (ends ~{datetime.fromtimestamp(time.time() + left):%H:%M})", flush=True)
  
     # Summary across permutations
     null_frame_mean = np.mean(null_frame_curves, axis=0)
