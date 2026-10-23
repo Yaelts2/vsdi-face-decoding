@@ -6,17 +6,21 @@
 % Group level: two-tailed exact Wilcoxon signed-rank, real vs null mean, sessions as the unit (n = 16).
 % The 4 sign combinations are tested the same way, BH-FDR across the 5 tests.
 %
-% Needs on path: yt_overlapFromMaps.m, yt_shuffleOverlapNull.m, yt_bhFDR.m (and plotModelFigures.m if a peak is left empty)
+% Needs on path: yt_overlapFromMaps.m, yt_shuffleOverlapNull.m, yt_bhFDR.m, yt_peaksFromDB.m
+%                (and plotModelFigures.m if a peak is neither in MODELS nor in the database)
 
 clear; clc;
 
 MAT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\saveDataModels\all';
 OUT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\overlapShuffleNull';
 
+% models database (peak1_frames / peak2_frames are used as the peak windows). '' = don't use it.
+DB_PATH = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\saveDataModels\models_database.mat';   % <- check
+
 % ------------------------------------------------------------------------------------------
 % Models + the peak windows (CENTER frames) you use for the real overlap of each model.
 %   - leave MODELS = {} to take EVERY .mat in MAT_DIR that has NullWeights_acrossT
-%   - a peak left [] is chosen with plotModelFigures (interactive, as before)   <- EDIT
+%   - peaks: from MODELS if given, else from the database, else chosen with plotModelFigures
 % ------------------------------------------------------------------------------------------
 MODELS = {
 %   .mat file name (in MAT_DIR)                                                    first peak   second peak
@@ -40,7 +44,38 @@ if isempty(MODELS)
     if isempty(MODELS); error('no model .mat with NullWeights_acrossT in %s', MAT_DIR); end
 end
 
+% --- database (optional): the variable whose name starts with 'DB' ---
+DB = [];
+if ~isempty(DB_PATH)
+    tmpDB = load(DB_PATH);
+    fn = fieldnames(tmpDB);
+    k = find(strncmp(fn, 'DB', 2), 1);
+    if isempty(k); error('no variable starting with ''DB'' in %s', DB_PATH); end
+    DB = tmpDB.(fn{k});
+    fprintf('database: %s (variable %s)\n', DB_PATH, fn{k});
+end
+
 n_models = size(MODELS, 1);
+peak_source = cell(n_models, 1);
+fprintf('\n%-60s %-12s %-12s %s\n', 'model', 'peak 1', 'peak 2', 'source');
+for m = 1:n_models
+    if ~isempty(MODELS{m,2}) && ~isempty(MODELS{m,3})
+        peak_source{m} = 'MODELS';
+    elseif ~isempty(DB)
+        [p1, p2, row] = yt_peaksFromDB(DB, MODELS{m,1});
+        if ~isempty(p1) && ~isempty(p2)
+            MODELS{m,2} = p1;  MODELS{m,3} = p2;
+            peak_source{m} = sprintf('database row %d', row);
+        else
+            peak_source{m} = 'NOT FOUND -> plotModelFigures';
+        end
+    else
+        peak_source{m} = 'plotModelFigures';
+    end
+    fprintf('%-60s %-12s %-12s %s\n', MODELS{m,1}(1:min(60,end)), mat2str(MODELS{m,2}), mat2str(MODELS{m,3}), peak_source{m});
+end
+fprintf('\n');
+
 R = cell(n_models, 1);
 for m = 1:n_models
     matpath = fullfile(MAT_DIR, MODELS{m,1});
@@ -150,6 +185,7 @@ if ~exist(OUT_DIR, 'dir'); mkdir(OUT_DIR); end
 results = struct();
 results.R          = R;            % per-model results (real, null, z, p, combos)
 results.models     = MODELS;       % file names + the peak windows used
+results.peak_source = peak_source; % where each model's peaks came from
 results.test_names = test_names;
 results.p_group    = p_group;
 results.q_group    = q_group;
