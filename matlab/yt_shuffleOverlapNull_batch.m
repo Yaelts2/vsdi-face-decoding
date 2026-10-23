@@ -15,16 +15,31 @@ OUT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\sch
 
 % ------------------------------------------------------------------------------------------
 % Models + the peak windows (CENTER frames) you use for the real overlap of each model.
-% Leave a peak [] to pick it with plotModelFigures (interactive, as before).   <- EDIT
+%   - leave MODELS = {} to take EVERY .mat in MAT_DIR that has NullWeights_acrossT
+%   - a peak left [] is chosen with plotModelFigures (interactive, as before)   <- EDIT
 % ------------------------------------------------------------------------------------------
 MODELS = {
 %   .mat file name (in MAT_DIR)                                                    first peak   second peak
-    'sliding_window__110209a24_frame1-100__SVM_10foldCV____2026-06-14_12-01-00.mat', [],          []
+%   'sliding_window__110209a24_frame1-100__SVM_10foldCV____2026-07-19_13-24-35.mat', 34:36,       48:50
 };
 
 MAKE_MODEL_FIGS = true;     % per-model figures (3 per model)
 
 % ------------------------------------------------------------------------------------------
+if isempty(MODELS)
+    files = dir(fullfile(MAT_DIR, 'sliding_window__*.mat'));
+    files = files(cellfun(@isempty, strfind({files.name}, '__backup_before_perm')));
+    MODELS = cell(0, 3);
+    for k = 1:numel(files)
+        vars = whos('-file', fullfile(MAT_DIR, files(k).name));
+        if any(strcmp({vars.name}, 'NullWeights_acrossT'))
+            MODELS(end+1, :) = {files(k).name, [], []}; %#ok<SAGROW>
+        end
+    end
+    fprintf('MODELS empty -> %d models with NullWeights_acrossT found in MAT_DIR\n', size(MODELS, 1));
+    if isempty(MODELS); error('no model .mat with NullWeights_acrossT in %s', MAT_DIR); end
+end
+
 n_models = size(MODELS, 1);
 R = cell(n_models, 1);
 for m = 1:n_models
