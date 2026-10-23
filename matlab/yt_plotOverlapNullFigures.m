@@ -11,8 +11,8 @@ function fig = yt_plotOverlapNullFigures(R, p_group, q_group, example)
 %     B  overall overlap: real vs the 100 shuffled-label decoders
 %     C  overlap by weight sign: real vs null (95% range + mean)
 %   Bottom row - all sessions
-%     D  per session: real - null-mean overlap (percentage points), with the spread of that
-%        session's own shuffles (grey, 95% range around 0); group Wilcoxon p
+%     D  overall overlap: each session's null mean connected to its real overlap (paired),
+%        group mean +/- SEM, Wilcoxon p (sessions as the unit)
 %     E  overlap by weight sign: real - null mean per session (dots), mean +/- SEM, BH-FDR q
 %
 %   Colours as in plotModelFigures: phase 1 green (dark = top 10%, light = bottom 10%),
@@ -111,36 +111,28 @@ box(ax, 'off');
 real_ov = [R.real];  null_mean = [R.null_mean];
 restricted = false(1, n);
 if isfield(R, 'roi_restricted'); restricted = [R.roi_restricted]; end
-day = cellfun(@(s) s(1:6), tags, 'UniformOutput', false);
 
-% order: by recording day, then as in R
-[~, ord] = sort(day);  ord = ord(:)';
-ax = axes('Position', [0.06 0.17 0.38 0.225]); hold(ax, 'on');
-n_above = 0;
-for j = 1:n
-    m = ord(j);
-    dn = R(m).null - R(m).null_mean;                      % this session's shuffles, around 0
-    lo = prctile_(dn, 2.5);  hi = prctile_(dn, 97.5);
-    patch(ax, [j-0.3 j+0.3 j+0.3 j-0.3], [lo lo hi hi], C.null, 'EdgeColor', 'none');
-    dv = real_ov(m) - null_mean(m);
-    plot(ax, j, dv, 'o', 'MarkerSize', 7, 'MarkerFaceColor', C.real, 'MarkerEdgeColor', 'k');
-    n_above = n_above + (dv > hi);
+ax = axes('Position', [0.07 0.17 0.24 0.225]); hold(ax, 'on');
+n_up = sum(real_ov > null_mean);
+for m = 1:n
+    if real_ov(m) > null_mean(m); lc = [0.55 0.55 0.55]; else; lc = [0.80 0.80 0.80]; end
+    plot(ax, [1 2], [null_mean(m) real_ov(m)], '-', 'Color', lc, 'LineWidth', 1);
 end
-plot(ax, [0.4 n + 0.6], [0 0], 'k-');
-% day separator
-days = unique(day);
-if numel(days) > 1
-    xb = sum(strcmp(day, days{1})) + 0.5;
-    plot(ax, [xb xb], [-100 100], ':', 'Color', [0.5 0.5 0.5]);
-end
-lbl = tags(ord);  lbl(restricted(ord)) = strcat(lbl(restricted(ord)), '*');
-ylv = [min([-3, real_ov - null_mean]) - 1, max(real_ov - null_mean) + 1.5];
-set(ax, 'XTick', 1:n, 'XTickLabel', lbl, 'XTickLabelRotation', 50, 'XLim', [0.4 n + 0.6], ...
-        'YLim', ylv, 'TickDir', 'out', 'FontSize', FS - 1);
-ylabel(ax, 'Real - null overlap (% points)', 'FontSize', FS);
-title(ax, {'D   Overall overlap, each session vs its own shuffles', ...
-      sprintf('red: real  |  grey: 95%% of shuffles  |  %d / %d above the range  |  Wilcoxon p = %s', ...
-      n_above, n, p_txt(p_group(1)))}, 'FontWeight', 'normal', 'FontSize', FS + 1);
+plot(ax, ones(1, n), null_mean, 'o', 'MarkerSize', 6, 'MarkerFaceColor', C.null, 'MarkerEdgeColor', [0.4 0.4 0.4]);
+plot(ax, 2 * ones(1, n), real_ov, 'o', 'MarkerSize', 6, 'MarkerFaceColor', C.real, 'MarkerEdgeColor', 'k');
+mn = mean(null_mean);  mr = mean(real_ov);
+sn = std(null_mean) / sqrt(n);  sr = std(real_ov) / sqrt(n);
+plot(ax, [0.72 0.88], [mn mn], 'k-', 'LineWidth', 2.5);  plot(ax, [0.8 0.8], mn + [-sn sn], 'k-', 'LineWidth', 1.5);
+plot(ax, [2.12 2.28], [mr mr], 'k-', 'LineWidth', 2.5);  plot(ax, [2.2 2.2], mr + [-sr sr], 'k-', 'LineWidth', 1.5);
+yv = [real_ov null_mean];
+ylp = [floor(min(yv)) - 1, ceil(max(yv)) + 2];
+plot(ax, [1 1 2 2], ylp(2) - [0.9 0.6 0.6 0.9], 'k-');
+text(ax, 1.5, ylp(2) - 0.5, p_star(p_group(1)), 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'FontSize', FS + 2);
+set(ax, 'XTick', [1 2], 'XTickLabel', {'shuffle null', 'real'}, 'XLim', [0.55 2.45], 'YLim', ylp, ...
+        'TickDir', 'out', 'FontSize', FS);
+ylabel(ax, 'Phase-1 / phase-2 overlap (%)', 'FontSize', FS);
+title(ax, {'D   Overall overlap', sprintf('%d / %d sessions real > null,  Wilcoxon p = %s', n_up, n, p_txt(p_group(1)))}, ...
+      'FontWeight', 'normal', 'FontSize', FS + 1);
 box(ax, 'off');
 
 % =====================================================================================
@@ -149,7 +141,7 @@ box(ax, 'off');
 combo_real = reshape([R.combo_real], 4, [])';             % n x 4
 combo_null = reshape([R.combo_null_mean], 4, [])';
 d = combo_real - combo_null;
-ax = axes('Position', [0.53 0.17 0.45 0.225]); hold(ax, 'on');
+ax = axes('Position', [0.40 0.17 0.58 0.225]); hold(ax, 'on');
 plot(ax, [0.4 4.6], [0 0], 'k-');
 ym = max(abs(d(:)));
 for i = 1:4
@@ -173,7 +165,7 @@ box(ax, 'off');
 % footnotes
 note = '+ = top 10% (face-preferring) weights,  - = bottom 10% weights;  left square = phase 1, right square = phase 2.';
 if any(restricted)
-    note = [note '   * real and null overlap computed on the permutation ROI.'];
+    note = [note sprintf('   %s: real and null overlap computed on the permutation ROI.', strjoin(tags(restricted), ', '))];
 end
 annotation(fig, 'textbox', [0.02 0.008 0.96 0.03], 'String', note, 'EdgeColor', 'none', ...
            'FontSize', FS - 1, 'Color', [0.4 0.4 0.4], 'HorizontalAlignment', 'center');
@@ -207,6 +199,10 @@ for i = 1:4
     patch(ax, [i+0.03 i+0.20 i+0.20 i+0.03], [y0 y0 y0+0.06*h y0+0.06*h], combo_cols{i,2}, 'EdgeColor', 'none', 'Clipping', 'off');
     text(ax, i, yl(1) - 0.19 * h, combo_lbl{i}, 'HorizontalAlignment', 'center', 'FontSize', FS, 'Clipping', 'off');
 end
+end
+
+function s = p_star(p)
+if p < 0.001; s = '***'; elseif p < 0.01; s = '**'; elseif p < 0.05; s = '*'; else; s = 'n.s.'; end
 end
 
 function s = p_txt(p)
