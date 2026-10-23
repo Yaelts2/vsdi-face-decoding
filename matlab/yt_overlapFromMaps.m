@@ -1,6 +1,6 @@
-function ov = yt_phaseOverlap(firstpeak, secondpeak)
-%YT_PHASEOVERLAP  Phase-1 / phase-2 extreme-weight overlap, EXACTLY as in plotModelFigures (section 4).
-%   ov = yt_phaseOverlap(firstpeak, secondpeak)
+function ov = yt_overlapFromMaps(firstpeak, secondpeak)
+%YT_OVERLAPFROMMAPS  Phase-1 / phase-2 extreme-weight overlap, EXACTLY as in plotModelFigures (section 4).
+%   ov = yt_overlapFromMaps(firstpeak, secondpeak)
 %
 %   firstpeak, secondpeak : 10000 x 1 weight maps (mean of Weights_acrossT over the peak windows),
 %                           NaN / 0 outside the ROI.

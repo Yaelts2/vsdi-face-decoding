@@ -1,12 +1,12 @@
 %% yt_shuffleOverlapNull_batch.m
 % Shuffle-model null for the phase-1 / phase-2 extreme-weight overlap, all datasets + group test.
 %
-% For every model: real overlap (yt_phaseOverlap on Weights_acrossT at the two peaks) vs the
+% For every model: real overlap (yt_overlapFromMaps on Weights_acrossT at the two peaks) vs the
 % overlap of the 100 shuffled-label models at the SAME peak windows (NullWeights_acrossT).
 % Group level: two-tailed exact Wilcoxon signed-rank, real vs null mean, sessions as the unit (n = 16).
 % The 4 sign combinations are tested the same way, BH-FDR across the 5 tests.
 %
-% Needs on path: yt_phaseOverlap.m, yt_shuffleOverlapNull.m, yt_bhFDR.m (and plotModelFigures.m if a peak is left empty)
+% Needs on path: yt_overlapFromMaps.m, yt_shuffleOverlapNull.m, yt_bhFDR.m (and plotModelFigures.m if a peak is left empty)
 
 clear; clc;
 
@@ -55,7 +55,7 @@ for m = 1:n_models
     R{m} = yt_shuffleOverlapNull(matpath, f1, f2, MAKE_MODEL_FIGS);
     % same procedure check: must equal plotModelFigures' overlap
     if ~isempty(ov_plot) && abs(ov_plot - R{m}.real) > 1e-9
-        warning('%s: yt_phaseOverlap (%.3f) differs from plotModelFigures (%.3f)!', MODELS{m,1}, R{m}.real, ov_plot);
+        warning('%s: yt_overlapFromMaps (%.3f) differs from plotModelFigures (%.3f)!', MODELS{m,1}, R{m}.real, ov_plot);
     end
 end
 R = [R{:}];

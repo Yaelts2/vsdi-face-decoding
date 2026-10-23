@@ -8,7 +8,7 @@ function r = yt_shuffleOverlapNull(matpath, first_frames, second_frames, make_fi
 %   second_frames  : CENTER frames of the second peak (e.g. 46:48)
 %   make_figs      : true (default) -> per-model figures
 %
-%   The overlap is computed with yt_phaseOverlap on
+%   The overlap is computed with yt_overlapFromMaps on
 %       real : mean(Weights_acrossT(:, peak windows), 2)
 %       null : mean(NullWeights_acrossT(:, same peak windows, p), 2)   for every shuffle p
 %   i.e. the SAME windows and the SAME procedure, only the weights come from a model trained on
@@ -68,7 +68,7 @@ if any(real_roi & ~null_roi)
             name, sum(null_roi), r.n_roi_real_model);
 end
 r.n_roi = sum(~isnan(firstpeak) & firstpeak ~= 0);
-ov_real = yt_phaseOverlap(firstpeak, secondpeak);
+ov_real = yt_overlapFromMaps(firstpeak, secondpeak);
 
 % --- null overlaps ---
 null_overall = zeros(1, n_perm);
@@ -77,7 +77,7 @@ null_nvalid  = zeros(1, n_perm);
 for p = 1:n_perm
     f1 = mean(double(NullW(:, npos1, p)), 2);
     f2 = mean(double(NullW(:, npos2, p)), 2);
-    ov = yt_phaseOverlap(f1, f2);
+    ov = yt_overlapFromMaps(f1, f2);
     null_overall(p)  = ov.overall;
     null_combo(p, :) = ov.combo;
     null_nvalid(p)   = sum(~isnan(f1) & f1 ~= 0);
