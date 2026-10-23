@@ -14,7 +14,7 @@ MAT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\sch
 OUT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\overlapShuffleNull';
 
 % models database (peak1_frames / peak2_frames are used as the peak windows). '' = don't use it.
-DB_PATH = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\saveDataModels\models_database.mat';   % <- check
+DB_PATH = fullfile(MAT_DIR, 'models_database.mat');   % the database is in the same folder as the models
 
 % ------------------------------------------------------------------------------------------
 % Models + the peak windows (CENTER frames) you use for the real overlap of each model.
