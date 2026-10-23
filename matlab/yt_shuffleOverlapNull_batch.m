@@ -27,6 +27,7 @@ MODELS = {
 };
 
 MAKE_MODEL_FIGS = false;    % true -> 3 figures per model
+SAVE_RESULTS    = false;    % true -> save 'results' to OUT_DIR
 
 % ------------------------------------------------------------------------------------------
 if isempty(MODELS)
@@ -177,17 +178,19 @@ end
 % ------------------------------------------------------------------------------------------
 % Save (tempdir -> movefile)
 % ------------------------------------------------------------------------------------------
-if ~exist(OUT_DIR, 'dir'); mkdir(OUT_DIR); end
-results = struct();
-results.R          = R;            % per-model results (real, null, z, p, combos)
-results.models     = MODELS;       % file names + the peak windows used
-results.peak_source = peak_source; % where each model's peaks came from
-results.test_names = test_names;
-results.p_group    = p_group;
-results.q_group    = q_group;
-fname = sprintf('overlapShuffleNull_%s.mat', datestr(now, 'yyyy-mm-dd_HH-MM-SS'));
-tmp = fullfile(tempdir, fname);
-save(tmp, 'results', '-v7');
-movefile(tmp, fullfile(OUT_DIR, fname), 'f');
-fprintf('\nsaved %s\n', fullfile(OUT_DIR, fname));
+if SAVE_RESULTS
+    if ~exist(OUT_DIR, 'dir'); mkdir(OUT_DIR); end
+    results = struct();
+    results.R          = R;            % per-model results (real, null, z, p, combos)
+    results.models     = MODELS;       % file names + the peak windows used
+    results.peak_source = peak_source; % where each model's peaks came from
+    results.test_names = test_names;
+    results.p_group    = p_group;
+    results.q_group    = q_group;
+    fname = sprintf('overlapShuffleNull_%s.mat', datestr(now, 'yyyy-mm-dd_HH-MM-SS'));
+    tmp = fullfile(tempdir, fname);
+    save(tmp, 'results', '-v7');
+    movefile(tmp, fullfile(OUT_DIR, fname), 'f');
+    fprintf('\nsaved %s\n', fullfile(OUT_DIR, fname));
+end
 
