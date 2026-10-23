@@ -27,7 +27,7 @@ C.p1    = [0.40 0.80 0.40];  C.p2    = [1.00 0.71 1.00];
 C.ov    = [0 0 0];           C.roi   = [0.93 0.93 0.93];  C.bg = [1 1 1];
 C.null  = [0.62 0.62 0.62];  C.real  = [0.85 0.10 0.10];
 combo_cols = {C.p1top, C.p2top; C.p1top, C.p2bot; C.p1bot, C.p2top; C.p1bot, C.p2bot};
-combo_lbl  = {'P1 + / P2 +', 'P1 + / P2 \minus', 'P1 \minus / P2 +', 'P1 \minus / P2 \minus'};
+combo_lbl  = {'P1 + / P2 +', 'P1 + / P2 -', 'P1 - / P2 +', 'P1 - / P2 -'};
 
 tags = cellfun(@(s) regexprep(s, '^.*?(\d{6}[a-z]\d{2}).*$', '$1'), {R.name}, 'UniformOutput', false);
 n = numel(R);
@@ -200,7 +200,7 @@ for i = 1:4
     patch(ax, [i+0.04 i+0.20 i+0.20 i+0.04], [y0 y0 y0+0.06*h y0+0.06*h], combo_cols{i,2}, 'EdgeColor', 'none', 'Clipping', 'off');
     text(ax, i, yl(1) - 0.17 * h, combo_lbl{i}, 'HorizontalAlignment', 'center', 'FontSize', 10, 'Clipping', 'off');
 end
-text(ax, 2.5, yl(1) - 0.27 * h, '+ = top 10% (face-preferring) weights,  \minus = bottom 10% weights;  left square = phase 1, right = phase 2', ...
+text(ax, 2.5, yl(1) - 0.27 * h, '+ = top 10% (face-preferring) weights,  - = bottom 10% weights;  left square = phase 1, right = phase 2', ...
      'HorizontalAlignment', 'center', 'FontSize', 8, 'Color', [0.4 0.4 0.4], 'Clipping', 'off');
 end
 
