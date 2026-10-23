@@ -127,7 +127,7 @@ yl = ylim;
 plot([r.real r.real], yl, 'r', 'LineWidth', 2.5);
 plot([r.null_mean r.null_mean], yl, '--k', 'LineWidth', 1.2);
 xlabel('Overlap (%)'); ylabel('Shuffled models');
-title(sprintf('%s\nreal %.1f%% vs null %.1f \\pm %.1f%%  (z = %.2f, p = %.3f, %d shuffles)', ...
+title(sprintf('%s\nreal %.1f%% vs null %.1f +/- %.1f%%  (z = %.2f, p = %.3f, %d shuffles)', ...
       name, r.real, r.null_mean, r.null_std, r.z, r.p_two, n_perm), 'Interpreter', 'none');
 legend({'null (shuffled labels)', 'real', 'null mean'}, 'Location', 'best'); box off; hold off;
 
