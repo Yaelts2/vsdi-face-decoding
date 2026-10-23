@@ -7,9 +7,9 @@ function fig = yt_plotOverlapNullFigures(R, p_group, q_group, example)
 %
 %   Columns: overall overlap, then the 4 sign combinations (P1+/P2+, P1+/P2-, P1-/P2+, P1-/P2-).
 %   Top row - example session: its 100 shuffled-label decoders (grey dots, black = mean) and the real
-%             decoder (red); stars = that session's own empirical test vs its null (two-tailed;
+%             decoder (blue); stars = that session's own empirical test vs its null (two-tailed;
 %             with 100 shuffles the smallest possible p is 0.02).
-%   Bottom row - all sessions: each session's null mean (grey) connected to its real overlap (red),
+%   Bottom row - all sessions: each session's null mean (grey) connected to its real overlap (blue),
 %             black = mean +/- SEM; stars = Wilcoxon over sessions (overall) / BH-FDR q (signs).
 %   Each column uses the same y-axis in both rows.
 %
@@ -20,7 +20,9 @@ if nargin < 4 || isempty(example); example = '110209a15'; end
 
 C.p1top = [0.00 0.50 0.20];  C.p1bot = [0.60 0.90 0.60];
 C.p2top = [1.00 0.00 1.00];  C.p2bot = [1.00 0.50 0.80];
-C.null  = [0.70 0.70 0.70];  C.real  = [0.85 0.10 0.10];
+C.null  = [0.72 0.72 0.72];  C.real  = [0.13 0.33 0.68];                 % null grey, real dark blue
+C.up    = [0.55 0.68 0.88];  C.down  = [0.84 0.84 0.84];                 % session lines: up / down
+C.tint  = [0.955 0.955 0.975];                                           % background of the Overall column
 combo_cols = {C.p1top, C.p2top; C.p1top, C.p2bot; C.p1bot, C.p2top; C.p1bot, C.p2bot};
 col_ttl = {'Overall', 'P1+ / P2+', 'P1+ / P2-', 'P1- / P2+', 'P1- / P2-'};
 FS = 9;
@@ -49,23 +51,26 @@ annotation(fig, 'textbox', [0.01 0.950 0.6 0.04], 'String', sprintf('Example ses
 annotation(fig, 'textbox', [0.01 0.480 0.6 0.04], 'String', sprintf('All sessions  (n = %d)', n), ...
            'EdgeColor', 'none', 'FontSize', 12, 'FontWeight', 'bold');
 
-w = 0.155;  gap = 0.04;  x0 = 0.06;
+w = 0.15;  gap = 0.035;  x0 = 0.06;  gap_overall = 0.075;
+xpos = [x0, x0 + w + gap_overall + (0:3) * (w + gap)];
 for k = 1:5
     % same y-range for both rows of this column
     allv = [ex_null(:, k); ex_real(k); g_null(:, k); g_real(:, k)];
     lo = min(allv);  hi = max(allv);  rg = max(hi - lo, 1);
     yl = [max(0, lo - 0.08 * rg), hi + 0.22 * rg];
-    xk = x0 + (k - 1) * (w + gap);
+    xk = xpos(k);
 
     % ---- top: example session ----
     ax = axes('Position', [xk, 0.575, w, 0.33]);
     example_panel(ax, ex_null(:, k), ex_real(k), ex_p(k), yl, C, FS);
+    if k == 1; set(ax, 'Color', C.tint); end
     title(ax, col_ttl{k}, 'FontWeight', 'bold', 'FontSize', FS + 2);
     if k == 1; ylabel(ax, 'Phase-1 / phase-2 overlap (%)', 'FontSize', FS); end
 
     % ---- bottom: all sessions ----
     ax = axes('Position', [xk, 0.135, w, 0.33]);
     paired_panel(ax, g_null(:, k), g_real(:, k), g_p(k), yl, C, FS);
+    if k == 1; set(ax, 'Color', C.tint); end
     if k == 1
         ylabel(ax, 'Phase-1 / phase-2 overlap (%)', 'FontSize', FS);
     else
@@ -73,8 +78,15 @@ for k = 1:5
     end
 end
 
-note = ['Top: grey = 100 shuffled-label decoders of this session (black = mean), red = real decoder; ' ...
-        'stars = test vs its own null.   Bottom: one line per session, null mean (grey) to real (red), ' ...
+% separator between Overall and the sign columns + header over the sign columns
+xsep = x0 + w + gap_overall / 2;
+annotation(fig, 'line', [xsep xsep], [0.09 0.93], 'Color', [0.6 0.6 0.6], 'LineStyle', ':', 'LineWidth', 1);
+annotation(fig, 'textbox', [xpos(2), 0.935, xpos(5) + w - xpos(2), 0.035], ...
+           'String', 'Overlap by weight sign   (phase 1 / phase 2)', 'EdgeColor', 'none', ...
+           'HorizontalAlignment', 'center', 'FontSize', FS + 2, 'Color', [0.25 0.25 0.25]);
+
+note = ['Top: grey = 100 shuffled-label decoders of this session (black = mean), blue = real decoder; ' ...
+        'stars = test vs its own null.   Bottom: one line per session, null mean (grey) to real (blue), ' ...
         'black = mean \pm SEM; stars = Wilcoxon over sessions (overall) / BH-FDR q (signs).'];
 note2 = ['+ / - = top / bottom 10% weights;  squares: left = phase 1, right = phase 2.   ' ...
          '* p < 0.05, ** p < 0.01, *** p < 0.001'];
@@ -107,7 +119,7 @@ function paired_panel(ax, vnull, vreal, p, yl, C, FS)
 hold(ax, 'on');
 n = numel(vnull);
 for m = 1:n
-    if vreal(m) > vnull(m); lc = [0.55 0.55 0.55]; else; lc = [0.82 0.82 0.82]; end
+    if vreal(m) > vnull(m); lc = C.up; else; lc = C.down; end
     plot(ax, [1 2], [vnull(m) vreal(m)], '-', 'Color', lc, 'LineWidth', 1);
 end
 plot(ax, ones(1, n), vnull, 'o', 'MarkerSize', 5, 'MarkerFaceColor', C.null, 'MarkerEdgeColor', [0.4 0.4 0.4]);
