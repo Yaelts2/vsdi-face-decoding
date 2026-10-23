@@ -185,9 +185,9 @@ results.peak_source = peak_source; % where each model's peaks came from
 results.test_names = test_names;
 results.p_group    = p_group;
 results.q_group    = q_group;
-fname = sprintf('overlapShuffleNull_%s.mat', datestr(now, 'yyyy-mm-dd_HH-MM'));
+fname = sprintf('overlapShuffleNull_%s.mat', datestr(now, 'yyyy-mm-dd_HH-MM-SS'));
 tmp = fullfile(tempdir, fname);
 save(tmp, 'results', '-v7');
-movefile(tmp, fullfile(OUT_DIR, fname));
+movefile(tmp, fullfile(OUT_DIR, fname), 'f');
 fprintf('\nsaved %s\n', fullfile(OUT_DIR, fname));
 
