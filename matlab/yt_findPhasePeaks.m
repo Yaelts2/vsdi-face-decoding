@@ -10,13 +10,11 @@ function P = yt_findPhasePeaks(db_path, model_dir, varargin)
 %   model_dir : folder of the model .mat files; the model is fullfile(model_dir, [model_id '.mat']),
 %               falling back to the stored mat_path with a warning
 %
-%   For each model you answer:
-%       1  = the peaks are good  -> saved
-%       2  = choose the peaks by CLICKING on the figure (click phase 1, then phase 2)
-%       3  = type the two peak center frames
-%       s  = skip this model (the database row is not changed)
-%       q  = quit (everything confirmed so far is already saved)
-%   After 2 / 3 the figure is redrawn with your peaks and you confirm again.
+%   For each model a figure shows the accuracy + the proposed peaks, and a dialog window asks:
+%       Good - save   -> this model is saved to the database right away
+%       Change peaks  -> a window to type the two peaks (center frame, e.g. 35, or 34:36);
+%                        the figure is redrawn with your peaks and you are asked again
+%       Skip / Quit   -> skip this model (row unchanged) or stop (everything saved so far is kept)
 %
 %   Automatic proposal (trial-level accuracy, windows with center time in [0, MaxMs] ms,
 %   time = (centers - zero_frame) * frame_duration_ms, as in plotModelFigures):
@@ -98,40 +96,52 @@ for r = opt.StartRow:n_rows
     while isempty(status)
         draw(fig, r, tag, t, c, acc, i1, it, i2, old1{r}, old2{r}, source, note, opt);
         if isempty(i1) || isempty(i2)
-            fprintf('no complete proposal - choose the peaks (2 = click, 3 = type), s = skip, q = quit\n');
+            fprintf('no complete proposal - choose the peaks in the dialog\n');
         else
             fprintf('proposal: phase 1 = %d:%d (%g ms, acc %.3f) | phase 2 = %d:%d (%g ms, acc %.3f) | database now: %s / %s\n', ...
                 c(i1)-1, c(i1)+1, t(i1), acc(i1), c(i2)-1, c(i2)+1, t(i2), acc(i2), old1{r}, old2{r});
         end
-        ans_in = strtrim(input('1 = good, 2 = click peaks, 3 = type peaks, s = skip, q = quit: ', 's'));
-        switch lower(ans_in)
-            case '1'
+        % ---- dialog window ----
+        if isempty(i1) || isempty(i2)
+            msg = sprintf('Row %d  -  %s\n\nNo automatic proposal (%s).\nChoose the peaks yourself.', r, tag, note);
+        else
+            msg = sprintf(['Row %d  -  %s\n\nPhase 1:  %d:%d   (%g ms, acc %.3f)\nPhase 2:  %d:%d   (%g ms, acc %.3f)\n\n' ...
+                           'Database now:  %s  /  %s\n\nAre these peaks good?'], r, tag, ...
+                           c(i1)-1, c(i1)+1, t(i1), acc(i1), c(i2)-1, c(i2)+1, t(i2), acc(i2), old1{r}, old2{r});
+        end
+        btn = questdlg(msg, sprintf('Phase peaks - row %d of %d', r, n_rows), ...
+                       'Good - save', 'Change peaks', 'Skip / Quit', 'Good - save');
+        switch btn
+            case 'Good - save'
                 if isempty(i1) || isempty(i2)
-                    fprintf('there are no two peaks yet - choose them with 2 or 3\n');
+                    uiwait(warndlg('There are no two peaks yet - use "Change peaks".', 'Phase peaks', 'modal'));
                 else
                     status = 'saved';
                 end
-            case '2'
-                fprintf('click on PHASE 1, then on PHASE 2 (in the figure)\n');
-                figure(fig);
-                [xc, ~] = ginput(2);
-                i1 = nearest_center(t, xc(1));  i2 = nearest_center(t, xc(2));
-                it = [];  source = 'clicked';  note = '';
-            case '3'
-                v1 = str2num(input('phase 1 center frame (e.g. 35, or 34:36): ', 's')); %#ok<ST2NM>
-                v2 = str2num(input('phase 2 center frame (e.g. 47, or 46:48): ', 's')); %#ok<ST2NM>
-                j1 = center_index(c, v1);  j2 = center_index(c, v2);
-                if isempty(j1) || isempty(j2)
-                    fprintf('not a window center of this model - try again\n');
-                else
-                    i1 = j1;  i2 = j2;  it = [];  source = 'typed';  note = '';
+            case 'Change peaks'
+                if isempty(i1); d1 = ''; else; d1 = sprintf('%d:%d', c(i1)-1, c(i1)+1); end
+                if isempty(i2); d2 = ''; else; d2 = sprintf('%d:%d', c(i2)-1, c(i2)+1); end
+                a = inputdlg({sprintf('Phase 1 - center frame or 3 frames (e.g. 35 or 34:36)\n[time (ms) = (center - %g) x %g]', ...
+                                      M.zero_frame, M.frame_duration_ms), ...
+                              'Phase 2 - center frame or 3 frames (e.g. 47 or 46:48)'}, ...
+                             sprintf('Change peaks - row %d  %s', r, tag), [1 60], {d1, d2});
+                if ~isempty(a)
+                    j1 = center_index(c, str2num(a{1})); %#ok<ST2NM>
+                    j2 = center_index(c, str2num(a{2})); %#ok<ST2NM>
+                    if isempty(j1) || isempty(j2)
+                        uiwait(warndlg('Not a window center of this model - try again.', 'Phase peaks', 'modal'));
+                    elseif c(j2) <= c(j1)
+                        uiwait(warndlg('Phase 2 must come after phase 1 - try again.', 'Phase peaks', 'modal'));
+                    else
+                        i1 = j1;  i2 = j2;  it = [];  source = 'manual';  note = '';
+                    end
                 end
-            case 's'
-                status = 'skipped';
-            case 'q'
-                status = 'quit';
-            otherwise
-                fprintf('answer 1, 2, 3, s or q\n');
+            case 'Skip / Quit'
+                b2 = questdlg(sprintf('Row %d  -  %s', r, tag), 'Skip or quit', ...
+                              'Skip this model', 'Quit (saved so far is kept)', 'Back', 'Back');
+                if strcmp(b2, 'Skip this model'); status = 'skipped'; end
+                if strcmp(b2, 'Quit (saved so far is kept)'); status = 'quit'; end
+            otherwise   % dialog closed with X -> ask again
         end
         if ~isempty(i1) && ~isempty(i2) && c(i2) <= c(i1) && strcmp(status, 'saved')
             fprintf('phase 2 must come after phase 1 - choose again\n');
@@ -261,10 +271,6 @@ end
 
 
 % =====================================================================================
-function i = nearest_center(t, x)
-[~, i] = min(abs(t - x));
-end
-
 function i = center_index(c, v)
 i = [];
 if isempty(v); return; end
