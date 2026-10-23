@@ -10,7 +10,7 @@
 
 clear; clc;
 
-MAT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\saveDataModels';
+MAT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\saveDataModels\all';
 OUT_DIR = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab\new project\new project results\overlapShuffleNull';
 
 % ------------------------------------------------------------------------------------------

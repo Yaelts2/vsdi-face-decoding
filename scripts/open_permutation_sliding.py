@@ -12,6 +12,7 @@
 #   null_w_centers       (n_win x 1) window centers (same units as 'centers')
 #   null_trial_acc_perm  (n_perm x n_win) trial accuracy of each shuffled model (should be ~0.5)
 #   perm_n, perm_seed, perm_dir
+import re
 import sys
 import shutil
 import tempfile
@@ -32,20 +33,47 @@ PERM_ROOT = Path(r"C:\project\vsdi-face-decoding\results\allareas\permutation_te
 
 # folder of the model .mat files (the .mat name = source_model_name in config.json)
 MAT_DIR = Path(r"C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\school\2nd\lab"
-               r"\new project\new project results\saveDataModels")
+               r"\new project\new project results\saveDataModels\all")
+
+
+def find_model_mat(mat_dir, source_model_name):
+    """Find the model .mat for this dataset, ignoring the date/time at the end of the name
+    (the permutation may have been made from another training run of the same dataset)."""
+    exact = mat_dir / (source_model_name + ".mat")
+    if exact.exists():
+        return exact
+
+    files = [f for f in mat_dir.glob("*.mat") if "__backup" not in f.stem]
+    strip_date = lambda s: re.sub(r"_*\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$", "", s)
+
+    prefix = strip_date(source_model_name)
+    hits = [f for f in files if strip_date(f.stem) == prefix]
+
+    if not hits:
+        m = re.search(r"\d{6}[a-z]\d{2}", source_model_name)      # 110209a24
+        if m is None:
+            raise ValueError(f"cannot find a dataset tag in '{source_model_name}'")
+        tag = m.group(0)
+        hits = [f for f in files if re.search(rf"(?<![0-9a-z]){tag}(?![0-9])", f.stem)]
+
+    if len(hits) == 0:
+        raise FileNotFoundError(f"no model .mat for '{source_model_name}' in {mat_dir}")
+    if len(hits) > 1:
+        raise ValueError("more than one model .mat matches - set the file by hand:\n  "
+                         + "\n  ".join(f.name for f in hits))
+    return hits[0]
 
 
 def append_one(test_root):
     """append the null weights of ONE permutation folder to its model .mat; returns a status string"""
     perm = sr.load_sliding_window_permutation(str(test_root))
     cfg = perm["config"]
-    model_mat = MAT_DIR / (cfg["source_model_name"] + ".mat")
-    if not model_mat.exists():
-        raise FileNotFoundError(f"model .mat not found: {model_mat.name}")
+    model_mat = find_model_mat(MAT_DIR, cfg["source_model_name"])
+    note = "" if model_mat.stem == cfg["source_model_name"] else f" [matched by dataset -> {model_mat.name}]"
 
     D = {k: v for k, v in loadmat(str(model_mat)).items() if not k.startswith("__")}
     if "perm_dir" in D and str(np.asarray(D["perm_dir"]).ravel()[0]) == str(test_root):
-        return "skipped (already appended)"
+        return "skipped (already appended)" + note
 
     null_w = np.asarray(perm["null_w_mean"], dtype=np.float32)        # (n_perm, n_win, n_roi)
     null_w_centers = np.asarray(perm["null_w_centers"], dtype=int)    # (n_win,)
@@ -80,7 +108,7 @@ def append_one(test_root):
 
     null_acc = float(np.mean(perm["null_trial_acc"]))
     return (f"done: {n_perm} shuffles x {n_win} windows (cols {null_w_win_idx[0]}-{null_w_win_idx[-1]}), "
-            f"null acc {null_acc:.3f}")
+            f"null acc {null_acc:.3f}{note}")
 
 
 if __name__ == "__main__":
