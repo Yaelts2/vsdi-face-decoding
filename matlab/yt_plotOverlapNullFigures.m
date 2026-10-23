@@ -24,7 +24,7 @@ if nargin < 4 || isempty(example); example = '110209a15'; end
 C.p1top = [0.00 0.50 0.20];  C.p1bot = [0.60 0.90 0.60];
 C.p2top = [1.00 0.00 1.00];  C.p2bot = [1.00 0.50 0.80];
 C.p1    = [0.40 0.80 0.40];  C.p2    = [1.00 0.71 1.00];
-C.ov    = [0 0 0];           C.roi   = [0.93 0.93 0.93];  C.bg = [1 1 1];
+C.ov    = [0 0 0];           C.roi   = [0.95 0.95 0.95];  C.bg = [1 1 1];   % as plotModelFigures
 C.null  = [0.62 0.62 0.62];  C.real  = [0.85 0.10 0.10];
 combo_cols = {C.p1top, C.p2top; C.p1top, C.p2bot; C.p1bot, C.p2top; C.p1bot, C.p2bot};
 combo_lbl  = {'P1 + / P2 +', 'P1 + / P2 -', 'P1 - / P2 +', 'P1 - / P2 -'};
@@ -189,6 +189,14 @@ m(valid) = 1;  m(e1 & ~e2) = 2;  m(e2 & ~e1) = 3;  m(e1 & e2) = 4;
 imagesc(ax, reshape(m, 100, 100)');
 colormap(ax, [C.bg; C.roi; C.p1; C.p2; C.ov]);
 caxis(ax, [0 4]);  axis(ax, 'image');  axis(ax, 'off');
+% overlap pixels drawn again as outlined squares - exactly as in plotModelFigures
+hold(ax, 'on');
+[oy, ox] = find(reshape(e1 & e2, 100, 100)');
+for k = 1:numel(ox)
+    rectangle(ax, 'Position', [ox(k)-0.5, oy(k)-0.5, 1, 1], ...
+              'FaceColor', C.ov, 'EdgeColor', 'k', 'LineWidth', 0.3);
+end
+hold(ax, 'off');
 end
 
 function combo_axis_labels(ax, combo_cols, combo_lbl, yl)
