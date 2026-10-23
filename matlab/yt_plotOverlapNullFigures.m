@@ -41,7 +41,7 @@ fig = figure('Name', 'Overlap vs shuffle null', 'Color', 'w', 'Position', [60 40
 % row headers
 annotation(fig, 'textbox', [0.01 0.955 0.6 0.04], 'String', sprintf('Example session  %s', example), ...
            'EdgeColor', 'none', 'FontSize', 12, 'FontWeight', 'bold');
-annotation(fig, 'textbox', [0.01 0.475 0.6 0.04], 'String', sprintf('All sessions  (n = %d)', n), ...
+annotation(fig, 'textbox', [0.01 0.465 0.6 0.04], 'String', sprintf('All sessions  (n = %d)', n), ...
            'EdgeColor', 'none', 'FontSize', 12, 'FontWeight', 'bold');
 
 % =====================================================================================
@@ -55,12 +55,12 @@ g2 = mean(double(S.NullWeights_acrossT(:, ismember(nc, ex.second_frames), pk)), 
 ov_null = yt_overlapFromMaps(g1, g2);
 valid = ~isnan(g1) & g1 ~= 0;
 
-ax = axes('Position', [0.02 0.60 0.22 0.31]);
+ax = axes('Position', [0.03 0.585 0.20 0.28]);
 overlap_map(ax, ov_null, valid, C);
 title(ax, {'A   Shuffled-label decoder', sprintf('overlap %.1f%%  (example shuffle)', ex.null(pk))}, ...
       'FontWeight', 'normal', 'FontSize', FS + 1);
 % compact colour key under the map
-axk = axes('Position', [0.02 0.535 0.22 0.05]); axis(axk, 'off'); hold(axk, 'on');
+axk = axes('Position', [0.03 0.53 0.20 0.045]); axis(axk, 'off'); hold(axk, 'on');
 keys = {C.p1, 'phase 1'; C.p2, 'phase 2'; C.ov, 'both'};
 for k = 1:3
     x0 = (k - 1) * 0.34;
@@ -72,7 +72,7 @@ set(axk, 'XLim', [0 1], 'YLim', [0 1]);
 % =====================================================================================
 % B - overall overlap, real vs null distribution
 % =====================================================================================
-ax = axes('Position', [0.31 0.60 0.22 0.30]); hold(ax, 'on');
+ax = axes('Position', [0.31 0.60 0.22 0.265]); hold(ax, 'on');
 edges = linspace(min([ex.null ex.real]) - 0.5, max([ex.null ex.real]) + 0.8, 26);
 histogram(ax, ex.null, edges, 'FaceColor', C.null, 'EdgeColor', 'w');
 yl = ylim(ax);
@@ -89,7 +89,7 @@ set(ax, 'TickDir', 'out', 'FontSize', FS); box(ax, 'off');
 % =====================================================================================
 % C - example session by weight sign
 % =====================================================================================
-ax = axes('Position', [0.60 0.60 0.38 0.30]); hold(ax, 'on');
+ax = axes('Position', [0.60 0.60 0.38 0.265]); hold(ax, 'on');
 for i = 1:4
     nd = ex.combo_null(:, i);
     lo = prctile_(nd, 2.5);  hi = prctile_(nd, 97.5);
@@ -115,7 +115,7 @@ day = cellfun(@(s) s(1:6), tags, 'UniformOutput', false);
 
 % order: by recording day, then as in R
 [~, ord] = sort(day);  ord = ord(:)';
-ax = axes('Position', [0.06 0.13 0.38 0.29]); hold(ax, 'on');
+ax = axes('Position', [0.06 0.17 0.38 0.225]); hold(ax, 'on');
 n_above = 0;
 for j = 1:n
     m = ord(j);
@@ -149,13 +149,13 @@ box(ax, 'off');
 combo_real = reshape([R.combo_real], 4, [])';             % n x 4
 combo_null = reshape([R.combo_null_mean], 4, [])';
 d = combo_real - combo_null;
-ax = axes('Position', [0.53 0.13 0.45 0.29]); hold(ax, 'on');
+ax = axes('Position', [0.53 0.17 0.45 0.225]); hold(ax, 'on');
 plot(ax, [0.4 4.6], [0 0], 'k-');
 ym = max(abs(d(:)));
 for i = 1:4
     mu = mean(d(:, i));  se = std(d(:, i)) / sqrt(n);
-    patch(ax, [i-0.25 i+0.25 i+0.25 i-0.25], [0 0 mu mu], combo_cols{i, 2}, 'FaceAlpha', 0.35, ...
-          'EdgeColor', combo_cols{i, 2}, 'LineWidth', 1.5);
+    patch(ax, [i-0.25 i+0.25 i+0.25 i-0.25], [0 0 mu mu], [0.85 0.85 0.85], ...
+          'EdgeColor', [0.35 0.35 0.35], 'LineWidth', 1);
     jit = (rand_(n, i) - 0.5) * 0.3;
     plot(ax, i + jit, d(:, i), 'o', 'MarkerFaceColor', [0.45 0.45 0.45], 'MarkerEdgeColor', 'none', 'MarkerSize', 5);
     plot(ax, [i i], mu + [-se se], 'k-', 'LineWidth', 2);
@@ -175,7 +175,7 @@ note = '+ = top 10% (face-preferring) weights,  - = bottom 10% weights;  left sq
 if any(restricted)
     note = [note '   * real and null overlap computed on the permutation ROI.'];
 end
-annotation(fig, 'textbox', [0.02 0.0 0.96 0.03], 'String', note, 'EdgeColor', 'none', ...
+annotation(fig, 'textbox', [0.02 0.008 0.96 0.03], 'String', note, 'EdgeColor', 'none', ...
            'FontSize', FS - 1, 'Color', [0.4 0.4 0.4], 'HorizontalAlignment', 'center');
 end
 
