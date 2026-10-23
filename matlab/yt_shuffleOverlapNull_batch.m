@@ -7,7 +7,6 @@
 % The 4 sign combinations are tested the same way, BH-FDR across the 5 tests.
 %
 % Needs on path: yt_overlapFromMaps.m, yt_shuffleOverlapNull.m, yt_bhFDR.m, yt_peaksFromDB.m
-%                (and plotModelFigures.m if a peak is neither in MODELS nor in the database)
 
 clear; clc;
 
@@ -20,14 +19,14 @@ DB_PATH = 'C:\Users\USER\OneDrive - Bar-Ilan University - Students\Documents\sch
 % ------------------------------------------------------------------------------------------
 % Models + the peak windows (CENTER frames) you use for the real overlap of each model.
 %   - leave MODELS = {} to take EVERY .mat in MAT_DIR that has NullWeights_acrossT
-%   - peaks: from MODELS if given, else from the database, else chosen with plotModelFigures
+%   - peaks: from MODELS if given, else from the database (never asked interactively)
 % ------------------------------------------------------------------------------------------
 MODELS = {
 %   .mat file name (in MAT_DIR)                                                    first peak   second peak
 %   'sliding_window__110209a24_frame1-100__SVM_10foldCV____2026-07-19_13-24-35.mat', 34:36,       48:50
 };
 
-MAKE_MODEL_FIGS = true;     % per-model figures (3 per model)
+MAKE_MODEL_FIGS = false;    % true -> 3 figures per model
 
 % ------------------------------------------------------------------------------------------
 if isempty(MODELS)
@@ -66,32 +65,29 @@ for m = 1:n_models
         if ~isempty(p1) && ~isempty(p2)
             MODELS{m,2} = p1;  MODELS{m,3} = p2;
             peak_source{m} = sprintf('database row %d', row);
+        elseif row > 0
+            peak_source{m} = sprintf('MISSING: database row %d has empty peaks', row);
         else
-            peak_source{m} = 'NOT FOUND -> plotModelFigures';
+            peak_source{m} = 'MISSING: dataset not in the database';
         end
     else
-        peak_source{m} = 'plotModelFigures';
+        peak_source{m} = 'MISSING: no database (DB_PATH empty) and no peaks in MODELS';
     end
     fprintf('%-60s %-12s %-12s %s\n', MODELS{m,1}(1:min(60,end)), mat2str(MODELS{m,2}), mat2str(MODELS{m,3}), peak_source{m});
 end
 fprintf('\n');
 
+% never ask interactively: stop BEFORE running anything if a model has no peaks
+missing = find(strncmp(peak_source, 'MISSING', 7));
+if ~isempty(missing)
+    error(['%d model(s) have no peak windows (see the table above).\n' ...
+           'Add them to the database or type them into MODELS, then run again.'], numel(missing));
+end
+
 R = cell(n_models, 1);
 for m = 1:n_models
     matpath = fullfile(MAT_DIR, MODELS{m,1});
-    f1 = MODELS{m,2};  f2 = MODELS{m,3};
-    if isempty(f1) || isempty(f2)
-        fprintf('\n--- %s: choose the peaks ---\n', MODELS{m,1});
-        [f1, f2, ov_plot] = plotModelFigures(matpath);
-        MODELS{m,2} = f1;  MODELS{m,3} = f2;
-    else
-        ov_plot = [];
-    end
-    R{m} = yt_shuffleOverlapNull(matpath, f1, f2, MAKE_MODEL_FIGS);
-    % same procedure check: must equal plotModelFigures' overlap
-    if ~isempty(ov_plot) && abs(ov_plot - R{m}.real) > 1e-9
-        warning('%s: yt_overlapFromMaps (%.3f) differs from plotModelFigures (%.3f)!', MODELS{m,1}, R{m}.real, ov_plot);
-    end
+    R{m} = yt_shuffleOverlapNull(matpath, MODELS{m,2}, MODELS{m,3}, MAKE_MODEL_FIGS);
 end
 R = [R{:}];
 
