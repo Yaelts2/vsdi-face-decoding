@@ -87,8 +87,15 @@ def append_one(test_root):
     # match windows + ROI with the real model
     mat_centers = np.asarray(D["centers"]).ravel().astype(int)
     null_w_win_idx = np.array([int(np.where(mat_centers == c)[0][0]) for c in null_w_centers]) + 1   # 1-based
-    if not np.array_equal(np.isfinite(np.asarray(D["Weights_acrossT"])[:, 0]), roi_mask):
-        raise ValueError("ROI of Weights_acrossT differs from the ROI of the permutation run")
+    roi_mat = np.isfinite(np.asarray(D["Weights_acrossT"])[:, 0])
+    if not np.array_equal(roi_mat, roi_mask):
+        if np.all(roi_mat[roi_mask]):
+            # permutation ROI is a SUBSET of the real model's ROI (decided for 030209a15):
+            # allowed - MATLAB then computes the real overlap on the same smaller ROI (see yt_shuffleOverlapNull)
+            note += f" [ROI: null on {int(roi_mask.sum())} of {int(roi_mat.sum())} real-model pixels]"
+        else:
+            raise ValueError(f"ROI of the permutation run ({int(roi_mask.sum())} px) is not inside the ROI of "
+                             f"Weights_acrossT ({int(roi_mat.sum())} px)")
 
     D["NullWeights_acrossT"] = NullW_img
     D["null_w_win_idx"] = null_w_win_idx.astype(np.float64).reshape(-1, 1)

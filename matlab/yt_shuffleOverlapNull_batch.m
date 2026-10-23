@@ -70,6 +70,9 @@ z_ov      = [R.z];
 p_sess    = [R.p_two];
 names     = {R.name};
 short     = cellfun(@(s) regexprep(s, '^sliding_window__(\w+?)_frame.*$', '$1'), names, 'UniformOutput', false);
+for m = 1:n_models
+    if R(m).roi_restricted; short{m} = [short{m} '*']; end   % * = overlap computed on the smaller null ROI
+end
 
 combo_real = reshape([R.combo_real], 4, [])';        % n_models x 4
 combo_null = reshape([R.combo_null_mean], 4, [])';
@@ -90,6 +93,9 @@ fprintf('\n================ SHUFFLE-MODEL OVERLAP NULL: %d models ==============
 fprintf('%-12s %8s %8s %8s %7s %8s\n', 'model', 'real%', 'null%', 'null_sd', 'z', 'p(two)');
 for m = 1:n_models
     fprintf('%-12s %8.1f %8.1f %8.1f %7.2f %8.3f\n', short{m}, real_ov(m), null_mean(m), null_std(m), z_ov(m), p_sess(m));
+end
+if any([R.roi_restricted])
+    fprintf('* real AND null overlap computed on the permutation ROI (smaller than the real-model ROI)\n');
 end
 fprintf('\nsessions with real > null (p<0.05, two-tailed): %d / %d\n', sum(p_sess < 0.05 & real_ov > null_mean), n_models);
 fprintf('\nGroup (Wilcoxon signed-rank, exact, two-tailed, real vs null mean; BH-FDR over 5 tests):\n');

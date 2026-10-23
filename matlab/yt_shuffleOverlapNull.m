@@ -50,6 +50,24 @@ end
 % --- real overlap ---
 firstpeak  = mean(W(:, pos1), 2);
 secondpeak = mean(W(:, pos2), 2);
+
+% if the null was made on a smaller ROI than the real model (030209a15), compute the real overlap
+% on that same smaller ROI, so real and null use the same pixels and the same 10% thresholds
+null_roi  = ~isnan(NullW(:, 1, 1));
+real_roi  = ~isnan(firstpeak) & firstpeak ~= 0;
+r.roi_restricted = false;
+r.n_roi_real_model = sum(real_roi);
+if any(real_roi & ~null_roi)
+    if any(null_roi & ~real_roi)
+        error('%s: the null ROI is not inside the real-model ROI.', name);
+    end
+    firstpeak(~null_roi)  = NaN;
+    secondpeak(~null_roi) = NaN;
+    r.roi_restricted = true;
+    fprintf('NOTE %s: real overlap computed on the null ROI (%d of %d pixels)\n', ...
+            name, sum(null_roi), r.n_roi_real_model);
+end
+r.n_roi = sum(~isnan(firstpeak) & firstpeak ~= 0);
 ov_real = yt_phaseOverlap(firstpeak, secondpeak);
 
 % --- null overlaps ---
@@ -66,11 +84,10 @@ for p = 1:n_perm
     if p == 1; ov_null_example = ov; end
 end
 
-% the null maps must cover the same pixels as the real map
-n_valid_real = sum(~isnan(firstpeak) & firstpeak ~= 0);
-if any(null_nvalid ~= n_valid_real)
+% the null maps must now cover exactly the same pixels as the real map
+if any(null_nvalid ~= r.n_roi)
     warning('%s: null maps have a different number of valid pixels (%d-%d) than the real map (%d).', ...
-            name, min(null_nvalid), max(null_nvalid), n_valid_real);
+            name, min(null_nvalid), max(null_nvalid), r.n_roi);
 end
 
 % --- stats ---
