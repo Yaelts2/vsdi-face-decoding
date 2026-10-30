@@ -105,7 +105,7 @@ for pnl = 1:3
           'FaceAlpha', 0.25, 'EdgeColor', 'none', 'HandleVisibility', 'off');
     plot(ax, t_ms([1 end]), [0 0], 'k:', 'HandleVisibility', 'off');
     plot(ax, [0 0], yl, 'k--', 'HandleVisibility', 'off');
-    hl = [];  ll = {};
+    hl = gobjects(0);  ll = {};
     for g = find(cell2mat(groups(:, 2))' == pnl)
         Y = curves(:, :, g);
         ok = ~any(isnan(Y), 2);                       % sessions where this group has pixels
