@@ -105,6 +105,7 @@ for pnl = 1:3
           'FaceAlpha', 0.25, 'EdgeColor', 'none', 'HandleVisibility', 'off');
     plot(ax, t_ms([1 end]), [0 0], 'k:', 'HandleVisibility', 'off');
     plot(ax, [0 0], yl, 'k--', 'HandleVisibility', 'off');
+    hl = [];  ll = {};
     for g = find(cell2mat(groups(:, 2))' == pnl)
         Y = curves(:, :, g);
         ok = ~any(isnan(Y), 2);                       % sessions where this group has pixels
@@ -114,13 +115,15 @@ for pnl = 1:3
               'EdgeColor', 'none', 'HandleVisibility', 'off');
         lbl = groups{g, 1};
         if ns < n; lbl = sprintf('%s (n = %d)', lbl, ns); end
-        plot(ax, t_ms, mu, groups{g, 4}, 'Color', groups{g, 3}, 'LineWidth', 2, 'DisplayName', lbl);
+        hl(end+1) = plot(ax, t_ms, mu, groups{g, 4}, 'Color', groups{g, 3}, 'LineWidth', 2);  %#ok<AGROW>
+        ll{end+1} = lbl;                                                                      %#ok<AGROW>
     end
     set(ax, 'XLim', t_ms([1 end]), 'YLim', yl, 'TickDir', 'out', 'FontSize', 9);
     xlabel(ax, 'Time from stimulus onset (ms)');
     if pnl == 1; ylabel(ax, ylab); end
     title(ax, ttl{pnl}, 'FontWeight', 'normal', 'FontSize', 11);
-    legend(ax, 'Location', 'southwest', 'Box', 'off', 'FontSize', 8);
+    lg = legend(ax, hl, ll, 'Location', 'southwest');      % explicit handles + labels (R2017b)
+    set(lg, 'Box', 'off', 'FontSize', 8);
     box(ax, 'off');
 end
 annotation(fig, 'textbox', [0.02 0.0 0.96 0.04], 'EdgeColor', 'none', 'FontSize', 8, 'Color', [0.35 0.35 0.35], ...
