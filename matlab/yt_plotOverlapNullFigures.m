@@ -9,8 +9,9 @@ function fig = yt_plotOverlapNullFigures(R, p_group, q_group, example)
 %   Top row - example session: its 100 shuffled-label decoders (grey dots, black = mean) and the real
 %             decoder (blue); stars = that session's own empirical test vs its null (two-tailed;
 %             with 100 shuffles the smallest possible p is 0.02).
-%   Bottom row - all sessions: each session's null mean (grey) connected to its real overlap (blue),
-%             black = mean +/- SEM; stars = Wilcoxon over sessions (overall) / BH-FDR q (signs).
+%   Bottom row - all sessions: each session's null mean (grey) connected to its real overlap (blue);
+%             small dots left of the null = group-average null (shuffle k averaged over sessions, 100
+%             values, black line = its mean); black bar right of real = real mean +/- SEM; stars = Wilcoxon over sessions (overall) / BH-FDR q (signs).
 %   Each column uses the same y-axis in both rows.
 %
 %   Colours as in plotModelFigures: phase 1 green (dark = top 10%, light = bottom 10%),
@@ -42,6 +43,19 @@ combo_null = reshape([R.combo_null_mean], 4, [])';
 g_null = [[R.null_mean]', combo_null];                    % n x 5
 g_real = [[R.real]', combo_real];                         % n x 5
 g_p    = [p_group(1), q_group(2:5)];
+% group-average null: shuffle k averaged over the sessions -> 100 values of the group mean by chance
+np = min(cellfun(@numel, {R.null}));
+g_shuf = zeros(np, 5);
+for m = 1:n
+    g_shuf = g_shuf + [R(m).null(1:np)', R(m).combo_null(1:np, :)] / n;
+end
+fprintf('\nGroup-average shuffle null (%d shuffles, each averaged over %d sessions):\n', np, n);
+for k = 1:5
+    gr = mean(g_real(:, k));
+    pg = min(1, 2 * min((sum(g_shuf(:, k) >= gr) + 1), (sum(g_shuf(:, k) <= gr) + 1)) / (np + 1));
+    fprintf('  %-10s real mean %5.1f%% | shuffle-average %5.1f%% (range %.1f-%.1f) | permutation p = %.3f\n', ...
+            col_ttl{k}, gr, mean(g_shuf(:, k)), min(g_shuf(:, k)), max(g_shuf(:, k)), pg);
+end
 restricted = false(1, n);
 if isfield(R, 'roi_restricted'); restricted = [R.roi_restricted]; end
 
@@ -55,7 +69,7 @@ w = 0.15;  gap = 0.035;  x0 = 0.06;  gap_overall = 0.075;
 xpos = [x0, x0 + w + gap_overall + (0:3) * (w + gap)];
 for k = 1:5
     % same y-range for both rows of this column
-    allv = [ex_null(:, k); ex_real(k); g_null(:, k); g_real(:, k)];
+    allv = [ex_null(:, k); ex_real(k); g_null(:, k); g_real(:, k); g_shuf(:, k)];
     lo = min(allv);  hi = max(allv);  rg = max(hi - lo, 1);
     yl = [max(0, lo - 0.08 * rg), hi + 0.22 * rg];
     xk = xpos(k);
@@ -69,7 +83,7 @@ for k = 1:5
 
     % ---- bottom: all sessions ----
     ax = axes('Position', [xk, 0.135, w, 0.33]);
-    paired_panel(ax, g_null(:, k), g_real(:, k), g_p(k), yl, C, FS);
+    paired_panel(ax, g_null(:, k), g_real(:, k), g_shuf(:, k), g_p(k), yl, C, FS);
     if k == 1; set(ax, 'Color', C.tint); end
     if k == 1
         ylabel(ax, 'Phase-1 / phase-2 overlap (%)', 'FontSize', FS);
@@ -86,8 +100,9 @@ annotation(fig, 'textbox', [xpos(2), 0.935, xpos(5) + w - xpos(2), 0.035], ...
            'HorizontalAlignment', 'center', 'FontSize', FS + 2, 'Color', [0.25 0.25 0.25]);
 
 note = ['Top: grey = 100 shuffled-label decoders of this session (black = mean), blue = real decoder; ' ...
-        'stars = test vs its own null.   Bottom: one line per session, null mean (grey) to real (blue), ' ...
-        'black = mean \pm SEM; stars = Wilcoxon over sessions (overall) / BH-FDR q (signs).'];
+        'stars = test vs its own null.   Bottom: one line per session, null mean (grey) to real (blue); small dots left = ' ...
+        'group-average null (each shuffle averaged over sessions, black = mean); black bar right = real mean \pm SEM; ' ...
+        'stars = Wilcoxon over sessions (overall) / BH-FDR q (signs).'];
 note2 = ['+ / - = top / bottom 10% weights;  squares: left = phase 1, right = phase 2.   ' ...
          '* p < 0.05, ** p < 0.01, *** p < 0.001'];
 if any(restricted)
@@ -114,10 +129,14 @@ set(ax, 'XTick', [1 2], 'XTickLabel', {'null', 'real'}, 'XLim', [0.5 2.5], 'YLim
 box(ax, 'off');
 end
 
-function paired_panel(ax, vnull, vreal, p, yl, C, FS)
-% all sessions: null mean (x = 1) -> real (x = 2) per session, group mean +/- SEM
+function paired_panel(ax, vnull, vreal, vshuf, p, yl, C, FS)
+% all sessions: null mean (x = 1) -> real (x = 2) per session, group mean +/- SEM;
+% vshuf = group-average null (each shuffle averaged over sessions), drawn as a cloud left of x = 1
 hold(ax, 'on');
 n = numel(vnull);
+ns = numel(vshuf);
+jit = (mod((1:ns)' * 0.6180339887, 1) - 0.5) * 0.16;
+plot(ax, 0.68 + jit, vshuf, 'o', 'MarkerSize', 2.5, 'MarkerFaceColor', [0.55 0.55 0.55], 'MarkerEdgeColor', 'none');
 for m = 1:n
     if vreal(m) > vnull(m); lc = C.up; else; lc = C.down; end
     plot(ax, [1 2], [vnull(m) vreal(m)], '-', 'Color', lc, 'LineWidth', 1);
@@ -126,10 +145,10 @@ plot(ax, ones(1, n), vnull, 'o', 'MarkerSize', 5, 'MarkerFaceColor', C.null, 'Ma
 plot(ax, 2 * ones(1, n), vreal, 'o', 'MarkerSize', 5, 'MarkerFaceColor', C.real, 'MarkerEdgeColor', 'k');
 mn = mean(vnull);  mr = mean(vreal);
 sn = std(vnull) / sqrt(n);  sr = std(vreal) / sqrt(n);
-plot(ax, [0.62 0.80], [mn mn], 'k-', 'LineWidth', 2.5);  plot(ax, [0.71 0.71], mn + [-sn sn], 'k-', 'LineWidth', 1.5);
+plot(ax, [0.57 0.79], [1 1] * mean(vshuf), 'k-', 'LineWidth', 2.5);     % mean of the group-average null
 plot(ax, [2.20 2.38], [mr mr], 'k-', 'LineWidth', 2.5);  plot(ax, [2.29 2.29], mr + [-sr sr], 'k-', 'LineWidth', 1.5);
 sig_bracket(ax, max([vnull(:); vreal(:)]), yl, p, FS);
-set(ax, 'XTick', [1 2], 'XTickLabel', {'null', 'real'}, 'XLim', [0.5 2.5], 'YLim', yl, 'TickDir', 'out', 'FontSize', FS);
+set(ax, 'XTick', [1 2], 'XTickLabel', {'null', 'real'}, 'XLim', [0.45 2.5], 'YLim', yl, 'TickDir', 'out', 'FontSize', FS);
 box(ax, 'off');
 end
 
